@@ -13,6 +13,7 @@
 
 #include "LibLsp/lsp/general/exit.h"
 #include "LibLsp/lsp/textDocument/did_open.h"
+#include "LibLsp/lsp/lsTextDocumentIdentifier.h" // Missing include inside of did_close.h, okay...
 #include "LibLsp/lsp/textDocument/did_close.h"
 
 class Logger final : public lsp::Log {
