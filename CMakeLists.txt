@@ -3,10 +3,19 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(etude-lsp-server)
 set(CMAKE_CXX_STANDARD 20)
 
+add_compile_options(-fsanitize=address,undefined)
+add_link_options(-fsanitize=address,undefined)
+
 include(cmake/CPM.cmake)
 
 add_executable(server server.cpp)
 
 CPMAddPackage("gh:kuafuwang/LspCpp#e0b443d42e7d23638d727ac8ef6839b9e527bf0a")
+# Так вот почему санитайзеры ругаются. Комплиятор уже при сборке говорит о том,
+#   что могут быть проблемы. Если их добавить в сборку, то выйдут ошибки компиляции
+#   на эту библиотеку. Эту ошибку в runtime можно избежать, если знать, как заставить эту
+#   сетевую библиотеку перезаписать неинициализированные поля. Постараемся это
+#   сделать.. Баги, баги, никто не собирал с санитайзерами.
+target_compile_options(network-uri PRIVATE "-Wno-error=maybe-uninitialized")
 target_link_libraries(server PRIVATE lspcpp)
 

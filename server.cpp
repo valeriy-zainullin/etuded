@@ -11,6 +11,8 @@
 #include "LibLsp/JsonRpc/Endpoint.h"
 #include "LibLsp/JsonRpc/Condition.h"
 
+#include "LibLsp/lsp/general/initialize.h"
+#include "LibLsp/lsp/general/initialized.h"
 #include "LibLsp/lsp/general/exit.h"
 #include "LibLsp/lsp/textDocument/did_open.h"
 #include "LibLsp/lsp/lsTextDocumentIdentifier.h" // Missing include inside of did_close.h, okay...
@@ -84,6 +86,13 @@ int main(int argc, char** argv) {
 
     auto json_handler = std::make_shared<lsp::ProtocolJsonHandler>();
     RemoteEndPoint client_endpoint(json_handler, server_endpoint, logger);
+
+    client_endpoint.registerHandler([&](const td_initialize::request& init_parms) {
+        return td_initialize::response();
+    });
+
+    client_endpoint.registerHandler([&](Notify_InitializedNotification::notify& notify) {
+    });
 
     client_endpoint.registerHandler([&](Notify_Exit::notify& notify) {
         client_endpoint.stop();
