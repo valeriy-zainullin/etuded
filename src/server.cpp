@@ -32,86 +32,106 @@ namespace colors {
 
   // Должны быть похожи на цвета какого-нибудь другого языка,
   //   для простоты. Чтобы расцветка была уже знакома пользователю.
+  // TODO: снять дамп цветов C++ в vscode и вписать сюда те же
+  //   цвета для похожих элементов. Просто сделать скрин и взять
+  //   цвет пипеткой. Некоторым символам добавить жирный шрифт.
   Color func_name = {1, 0, 0};
 }
 
 class ColoringVisitor: public Visitor {
 public:
-  ColoringVisitor(std::vector<ColorInformation>& colorings)
+  ColoringVisitor(std::vector<ColorInformation>* colorings)
     : colorings_(colorings) {}
+
+  lsRange TokenToLsRange(const lex::Token& token) {
+    // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
+    //   IDE с большой вероятностью будет сильно тормозить.
+    assert(token.start.lineno <= std::numeric_limits<unsigned>::max());
+    assert(token.start.colno  <= std::numeric_limits<unsigned>::max());
+
+    assert(token.end.lineno   <= std::numeric_limits<unsigned>::max());
+    assert(token.end.colno    <= std::numeric_limits<unsigned>::max());
+
+    lsPosition start = {token.start.lineno, token.start.columnno};
+    lsPosition end   = {token.start.lineno, token.start.columnno};
+
+    return lsRange{std::move(start), std::move(end)};
+  }
 
   // Statements
 
-  void VisitYield(YieldStatement* node) override = 0;
+  void VisitYield(YieldStatement* node) override {}
 
-  void VisitReturn(ReturnStatement* node) override = 0;
+  void VisitReturn(ReturnStatement* node) override {}
 
-  void VisitAssignment(AssignmentStatement* node) override = 0;
+  void VisitAssignment(AssignmentStatement* node) override {}
 
-  void VisitExprStatement(ExprStatement* node) override = 0;
+  void VisitExprStatement(ExprStatement* node) override {}
 
   // Declarations
 
-  void VisitTypeDecl(TypeDeclStatement* node) override = 0;
+  void VisitTypeDecl(TypeDeclStatement* node) override {}
 
-  void VisitVarDecl(VarDeclStatement* node) override = 0;
+  void VisitVarDecl(VarDeclStatement* node) override {}
 
   void VisitFunDecl(FunDeclStatement* node) override {
-    colorings_.emplace_back(Col);
+    colorings_->push_back(ColorInformation{
+      lsRange{TokenToLsRange(node->name_)}, colors::func_name
+    });
   }
 
-  void VisitTraitDecl(TraitDeclaration* node) override = 0;
+  void VisitTraitDecl(TraitDeclaration* node) override {};
 
-  void VisitImplDecl(ImplDeclaration* node) override = 0;
+  void VisitImplDecl(ImplDeclaration* node) override {};
 
   // Patterns
 
-  void VisitBindingPat(BindingPattern* node) override = 0;
+  void VisitBindingPat(BindingPattern* node) override {};
 
-  void VisitDiscardingPat(DiscardingPattern* node) override = 0;
+  void VisitDiscardingPat(DiscardingPattern* node) override {};
 
-  void VisitLiteralPat(LiteralPattern* node) override = 0;
+  void VisitLiteralPat(LiteralPattern* node) override {};
 
-  void VisitStructPat(StructPattern* node) override = 0;
+  void VisitStructPat(StructPattern* node) override {};
 
-  void VisitVariantPat(VariantPattern* node) override = 0;
+  void VisitVariantPat(VariantPattern* node) override {};
 
   // Expressions
 
-  void VisitComparison(ComparisonExpression* node) override = 0;
+  void VisitComparison(ComparisonExpression* node) override {};
 
-  void VisitBinary(BinaryExpression* node) override = 0;
+  void VisitBinary(BinaryExpression* node) override {};
 
-  void VisitUnary(UnaryExpression* node) override = 0;
+  void VisitUnary(UnaryExpression* node) override {};
 
-  void VisitDeref(DereferenceExpression* node) override = 0;
+  void VisitDeref(DereferenceExpression* node) override {};
 
-  void VisitAddressof(AddressofExpression* node) override = 0;
+  void VisitAddressof(AddressofExpression* node) override {};
 
-  void VisitIf(IfExpression* node) override = 0;
+  void VisitIf(IfExpression* node) override {};
 
-  void VisitMatch(MatchExpression* node) override = 0;
+  void VisitMatch(MatchExpression* node) override {};
 
-  void VisitNew(NewExpression* node) override = 0;
+  void VisitNew(NewExpression* node) override {};
 
-  void VisitBlock(BlockExpression* node) override = 0;
+  void VisitBlock(BlockExpression* node) override {};
 
-  void VisitFnCall(FnCallExpression* node) override = 0;
+  void VisitFnCall(FnCallExpression* node) override {};
 
-  void VisitIntrinsic(IntrinsicCall* node) override = 0;
+  void VisitIntrinsic(IntrinsicCall* node) override {};
 
-  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override = 0;
+  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override {};
 
-  void VisitFieldAccess(FieldAccessExpression* node) override = 0;
+  void VisitFieldAccess(FieldAccessExpression* node) override {};
 
-  void VisitVarAccess(VarAccessExpression* node) override = 0;
+  void VisitVarAccess(VarAccessExpression* node) override {};
 
-  void VisitLiteral(LiteralExpression* node) override = 0;
+  void VisitLiteral(LiteralExpression* node) override {};
 
-  void VisitTypecast(TypecastExpression* node) override = 0;
+  void VisitTypecast(TypecastExpression* node) override {};
 
 private:
-  std::vector<ColorInformation>& colorings_;
+  std::vector<ColorInformation>* colorings_;
 };
 
 namespace fs = std::filesystem;
