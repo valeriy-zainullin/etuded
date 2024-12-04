@@ -6,6 +6,7 @@
 #include <memory>
 
 // LibLsp.
+#include "LibLsp/lsp/AbsolutePath.h"
 #include "LibLsp/lsp/ProtocolJsonHandler.h"
 #include "LibLsp/JsonRpc/stream.h"
 #include "LibLsp/JsonRpc/RemoteEndPoint.h"
@@ -24,52 +25,7 @@
 #include "driver/compil_driver.hpp"
 #include "driver/module.hpp"
 
-class Logger final : public lsp::Log {
-public:
-    void log(Level level, std::wstring&& msg) override {
-        return log(level, msg);
-    }
-
-    void log(Level level, const std::wstring& msg) override {
-        std::ignore = level;
-        std::wcerr << msg << '\n';
-        std::wcerr.flush();
-    }
-
-    void log(Level level, std::string&& msg) override {
-        return log(level, msg); // log(Level, const std::string& msg);
-    }
-
-    void log(Level level, const std::string& msg) override {
-        std::ignore = level;
-        std::cerr << msg << '\n';
-        std::cerr.flush();
-    }
-};
-
-template <typename T>
-class istream : public lsp::base_istream<T> {
-    using lsp::base_istream<T>::base_istream;
-
-public:
-    std::string what() override {
-        return std::string();
-    }
-
-    virtual ~istream() = default;
-};
-
-template <typename T>
-class ostream : public lsp::base_ostream<T> {
-    using lsp::base_ostream<T>::base_ostream;
-
-public:
-    std::string what() override {
-        return std::string();
-    }
-
-    virtual ~ostream() = default;
-};
+#include "logger.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 1 || argv[0] == nullptr) {
@@ -109,12 +65,13 @@ int main(int argc, char** argv) {
     std::map<std::string, Module> ast_cache;
 
     client_endpoint.registerHandler([&](const td_documentColor::request& request) {
-        std::string doc_path = request.params.textDocument.uri.GetAbsolutePath();
+        std::string doc_path = request.params.textDocument.uri.GetAbsolutePath().path;
         std::vector<ColorInformation> coloring;
 
         decltype(ast_cache)::iterator ast_it = ast_cache.find(doc_path);
         if (ast_it != ast_cache.end()) {
-            colorFile(*ast_it);
+            Module& module = ast_it->second;
+            // module.
         } else {
             // Компилятор на данный момент ищет файлы в рабочей директории.
             //   В том числе, все импортируемые. Кроме стандартной библиотеки,
@@ -129,10 +86,7 @@ int main(int argc, char** argv) {
 
             std::string module_name = path.filename().replace_extension();
             CompilationDriver driver(module_name);
-            if (!driver.Compile()) {
-
-            }
-
+            driver.Compile();
         }
 
         td_documentColor::response response;

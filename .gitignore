@@ -2,3 +2,4 @@ build
 build_vscode
 .vscode
 /server
+etc

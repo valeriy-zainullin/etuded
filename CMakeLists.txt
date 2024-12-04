@@ -8,7 +8,7 @@ add_link_options(-fsanitize=address,undefined)
 
 include(cmake/CPM.cmake)
 
-add_executable(server server.cpp)
+add_executable(server src/server.cpp)
 
 CPMAddPackage("gh:kuafuwang/LspCpp#e0b443d42e7d23638d727ac8ef6839b9e527bf0a")
 # Так вот почему санитайзеры ругаются. Комплиятор уже при сборке говорит о том,
@@ -19,6 +19,7 @@ CPMAddPackage("gh:kuafuwang/LspCpp#e0b443d42e7d23638d727ac8ef6839b9e527bf0a")
 target_compile_options(network-uri PRIVATE "-Wno-error=maybe-uninitialized")
 target_link_libraries(server PRIVATE lspcpp)
 
-CPMAddPackage("gh:otakubeam/etude#effcece34dacc2e20d5db81c276b0e22ae984814")
+add_subdirectory(etude)
+# CPMAddPackage("gh:otakubeam/etude#effcece34dacc2e20d5db81c276b0e22ae984814")
 target_link_libraries(server PRIVATE compiler)
 

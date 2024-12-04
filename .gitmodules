@@ -1,0 +1,3 @@
+[submodule "etude"]
+	path = etude
+	url = git@github.com:valeriy-zainullin/etude.git
