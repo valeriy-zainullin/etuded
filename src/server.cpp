@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <condition_variable>
 #include <memory>
+#include <variant>
 
 // LibLsp.
 #include "LibLsp/lsp/AbsolutePath.h"
@@ -16,7 +17,7 @@
 #include "LibLsp/lsp/general/initialized.h"
 #include "LibLsp/lsp/general/exit.h"
 #include "LibLsp/lsp/textDocument/did_open.h"
-#include "LibLsp/lsp/textDocument/documentColor.h"
+#include "LibLsp/lsp/textDocument/document_symbol.h"
 #include "LibLsp/lsp/lsTextDocumentIdentifier.h" // Missing include inside of did_close.h, okay...
 #include "LibLsp/lsp/lsDocumentUri.h"
 #include "LibLsp/lsp/textDocument/did_close.h"
@@ -27,34 +28,42 @@
 
 #include "logger.hpp"
 
-namespace colors {
-  using Color = TextDocument::Color;
-
-  // Должны быть похожи на цвета какого-нибудь другого языка,
-  //   для простоты. Чтобы расцветка была уже знакома пользователю.
-  // TODO: снять дамп цветов C++ в vscode и вписать сюда те же
-  //   цвета для похожих элементов. Просто сделать скрин и взять
-  //   цвет пипеткой. Некоторым символам добавить жирный шрифт.
-  Color func_name = {1, 0, 0};
-}
-
-class ColoringVisitor: public Visitor {
+class LSPVisitor: public Visitor {
 public:
-  ColoringVisitor(std::vector<ColorInformation>* colorings)
-    : colorings_(colorings) {}
+  LSPVisitor(const lsDocumentUri& file_uri, std::vector<lsDocumentSymbol>* symbols)
+    : file_uri(file_uri)
+    , symbols_(symbols) {
+      assert(symbols_ != nullptr);
+  }
 
-  lsRange TokenToLsRange(const lex::Token& token) {
+  LSPVisitor(LSPVisitor&&) = default;
+  LSPVisitor(const LSPVisitor&) = delete;
+
+  LSPVisitor& operator=(LSPVisitor&&) = default;
+  LSPVisitor& operator=(const LSPVisitor&) = delete;
+
+  static lsRange TokenToLsRange(const lex::Token& token) {
     // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
     //   IDE с большой вероятностью будет сильно тормозить.
-    assert(token.start.lineno <= std::numeric_limits<unsigned>::max());
-    assert(token.start.colno  <= std::numeric_limits<unsigned>::max());
+    assert(token.location.lineno   >= 0);
+    assert(token.location.columnno >= 1); // Позиция после последнего символа. Храним правую границу полуинтервала [start, end).
+    assert(token.location.lineno   <= std::numeric_limits<int>::max());
+    assert(token.location.columnno <= std::numeric_limits<int>::max());
 
-    assert(token.end.lineno   <= std::numeric_limits<unsigned>::max());
-    assert(token.end.colno    <= std::numeric_limits<unsigned>::max());
+    // Позиция токена -- номер строки и столбца сразу после него.
+    //   Все токены однострочные, перевод строки разделяет токены.
+    assert(token.location.columnno >= token.length());
 
-    lsPosition start = {token.start.lineno, token.start.columnno};
-    lsPosition end   = {token.start.lineno, token.start.columnno};
+    int line = static_cast<int>(token.location.lineno);
+    int col  = static_cast<int>(token.location.columnno);
 
+    lsPosition end(line, col);
+    lsPosition start(end.line, col - static_cast<int>(token.length()));
+
+    fmt::println(stderr, "TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
+
+    // Exclusive like range in editor.
+    // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range
     return lsRange{std::move(start), std::move(end)};
   }
 
@@ -62,84 +71,149 @@ public:
 
   void VisitYield(YieldStatement* node) override {}
 
-  void VisitReturn(ReturnStatement* node) override {}
+  void VisitReturn(ReturnStatement* node) override {
+    symbols_->push_back(lsDocumentSymbol{
+      name: "return",
+      kind: SymbolKind::Operator,
+      range: TokenToLsRange(node->return_token_),
+    });
 
-  void VisitAssignment(AssignmentStatement* node) override {}
+    node->return_value_->Accept(this);
+  }
 
-  void VisitExprStatement(ExprStatement* node) override {}
+  void VisitAssignment(AssignmentStatement* node) override {
+    node->target_->Accept(this);
+    node->value_->Accept(this);
 
-  // Declarations
-
-  void VisitTypeDecl(TypeDeclStatement* node) override {}
-
-  void VisitVarDecl(VarDeclStatement* node) override {}
-
-  void VisitFunDecl(FunDeclStatement* node) override {
-    colorings_->push_back(ColorInformation{
-      lsRange{TokenToLsRange(node->name_)}, colors::func_name
+    symbols_->push_back(lsDocumentSymbol{
+      name: "assign",
+      kind: lsSymbolKind::Operator,
+      range: TokenToLsRange(node->assign_),
     });
   }
 
-  void VisitTraitDecl(TraitDeclaration* node) override {};
+  void VisitExprStatement(ExprStatement* node) override {
+    node->expr_->Accept(this);
+  }
 
-  void VisitImplDecl(ImplDeclaration* node) override {};
+  // Declarations
+
+  void VisitTypeDecl(TypeDeclStatement* node) override {
+    // TODO.
+  }
+
+  void VisitVarDecl(VarDeclStatement* node) override {
+    // TODO.
+  }
+
+  void VisitFunDecl(FunDeclStatement* node) override {
+    // TODO: store fun token in AST for editor
+    //   integration purposes (coloring). 
+    // symbols_->push_back(lsSymbol{
+    //   name: "fun",
+    //   kind: SymbolKind::Operator,
+    //   location: lsLocation{
+    //     file_uri,
+    //     TokenToLsRange(node->)
+    //   }
+    // });
+
+    symbols_->push_back(lsDocumentSymbol{
+      name: "function name",
+      kind: lsSymbolKind::Function,
+      range: TokenToLsRange(node->name_),
+      selectionRange: TokenToLsRange(node->name_),
+    });
+
+    for (const lex::Token& formal: node->formals_) {
+      symbols_->push_back(lsDocumentSymbol{
+        name: "function parameter",
+        kind: lsSymbolKind::Parameter,
+        range: TokenToLsRange(formal),
+        selectionRange: TokenToLsRange(formal),
+      });
+    }
+  }
+
+  void VisitTraitDecl(TraitDeclaration* node) override {}
+
+  void VisitImplDecl(ImplDeclaration* node) override {}
 
   // Patterns
 
-  void VisitBindingPat(BindingPattern* node) override {};
+  void VisitBindingPat(BindingPattern* node) override {}
 
-  void VisitDiscardingPat(DiscardingPattern* node) override {};
+  void VisitDiscardingPat(DiscardingPattern* node) override {}
 
-  void VisitLiteralPat(LiteralPattern* node) override {};
+  void VisitLiteralPat(LiteralPattern* node) override {}
 
-  void VisitStructPat(StructPattern* node) override {};
+  void VisitStructPat(StructPattern* node) override {}
 
-  void VisitVariantPat(VariantPattern* node) override {};
+  void VisitVariantPat(VariantPattern* node) override {}
 
   // Expressions
 
-  void VisitComparison(ComparisonExpression* node) override {};
+  void VisitComparison(ComparisonExpression* node) override {}
 
-  void VisitBinary(BinaryExpression* node) override {};
+  void VisitBinary(BinaryExpression* node) override {}
 
-  void VisitUnary(UnaryExpression* node) override {};
+  void VisitUnary(UnaryExpression* node) override {}
 
-  void VisitDeref(DereferenceExpression* node) override {};
+  void VisitDeref(DereferenceExpression* node) override {}
 
-  void VisitAddressof(AddressofExpression* node) override {};
+  void VisitAddressof(AddressofExpression* node) override {}
 
-  void VisitIf(IfExpression* node) override {};
+  void VisitIf(IfExpression* node) override {}
 
-  void VisitMatch(MatchExpression* node) override {};
+  void VisitMatch(MatchExpression* node) override {}
 
-  void VisitNew(NewExpression* node) override {};
+  void VisitNew(NewExpression* node) override {}
 
-  void VisitBlock(BlockExpression* node) override {};
+  void VisitBlock(BlockExpression* node) override {}
 
-  void VisitFnCall(FnCallExpression* node) override {};
+  void VisitFnCall(FnCallExpression* node) override {}
 
-  void VisitIntrinsic(IntrinsicCall* node) override {};
+  void VisitIntrinsic(IntrinsicCall* node) override {}
 
-  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override {};
+  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override {}
 
-  void VisitFieldAccess(FieldAccessExpression* node) override {};
+  void VisitFieldAccess(FieldAccessExpression* node) override {}
 
-  void VisitVarAccess(VarAccessExpression* node) override {};
+  void VisitVarAccess(VarAccessExpression* node) override {}
 
-  void VisitLiteral(LiteralExpression* node) override {};
+  void VisitLiteral(LiteralExpression* node) override {
+    fmt::println(stderr, "literal visited!");
+    symbols_->push_back(lsDocumentSymbol{
+      name: "literal",
+      kind: std::visit(
+        [](auto& value) -> lsSymbolKind {
+          if constexpr (std::is_same_v<decltype(value), std::string_view&>) {
+            return lsSymbolKind::String;
+          } else if constexpr (std::is_same_v<decltype(value), int&>) {
+            return lsSymbolKind::Number;
+          } else {
+            return lsSymbolKind::Unknown;
+          }
+        },
+        node->token_.sem_info
+      ),
+      range: TokenToLsRange(node->token_),
+    });
+  };
 
-  void VisitTypecast(TypecastExpression* node) override {};
+  void VisitTypecast(TypecastExpression* node) override {}
 
 private:
-  std::vector<ColorInformation>* colorings_;
+  const lsDocumentUri& file_uri;
+  std::vector<lsDocumentSymbol>* symbols_;
 };
 
 namespace fs = std::filesystem;
 class ViewedFile {
 public:
-  ViewedFile(std::string doc_path)
-    : path(doc_path) {
-      assert(path.is_absolute());
+  ViewedFile(lsDocumentUri uri)
+    : uri_(std::move(uri)), path_(uri_.GetAbsolutePath().path) {
+      assert(path_.is_absolute());
 
       Invalidate();
   }
@@ -152,25 +226,33 @@ public:
       //   этого не зависят.
 
       // https://stackoverflow.com/a/57096619
-      fs::current_path(path.parent_path());
+      fs::current_path(path_.parent_path());
 
-      CompilationDriver driver(GetModuleName());
+      std::string module_name = GetModuleName();
+      // Важно, чтобы module_name существовал все время выполнения
+      //   этой функции, потому что compilation driver
+      //   принимает эту строку как std::string_view.
+      CompilationDriver driver(module_name);
       driver.PrepareForTooling();
 
-      coloring.clear();
-      driver.RunVisitor(ColoringVisitor(&coloring));
+      symbols.clear();
+
+      LSPVisitor visitor(uri_, &symbols);
+      driver.RunVisitor(&visitor);
   }
 private:
   std::string GetModuleName() {
       // Module.et -> Module
-      return path.filename().replace_extension();
+      return path_.filename().replace_extension();
   }
 public:
-  fs::path path;
-  std::vector<ColorInformation> coloring;
+  lsDocumentUri uri_;
+  fs::path path_;
+
+  std::vector<lsDocumentSymbol> symbols;
 };
 
-std::map<std::string, ViewedFile> doc_path_to_file;
+std::unordered_map<std::string, ViewedFile> file_cache;
 
 int main(int argc, char** argv) {
   if (argc < 1 || argv[0] == nullptr) {
@@ -200,28 +282,43 @@ int main(int argc, char** argv) {
     
     response.id = request.id;
     response.result.capabilities = lsServerCapabilities {
-        .colorProvider = {{true, {}}}
+        .documentSymbolProvider = {{true, {}}}
     };
 
     return response;
   });
 
-  std::map<std::string, Module> ast_cache;
+  auto find_file = [&](const lsDocumentUri& uri) -> ViewedFile& {
+    auto file_it = file_cache.find(uri.raw_uri_);
+    if (file_it == file_cache.end()) {
+      // Здесь произойдет разбор файла с путем doc_path.
+      //   Внутри конструктора будет вызов Invalidate(), он
+      //   разбирает файл и собарет информацию, которую
+      //   отображает редактор.
+      // TODO: в дальнейшем может понадобиться комплиировать
+      //   буффер текста, а не файл с диска. Если он еще не был
+      //   сохранен в редакторе.
+      // NOTE: пока не понятно, как давать подсказки по дополнению.
+      //   Нужно разобраться в алгоритме, как это работает в других
+      //   случаях. Т.к. если код не дописан, будут ошибки со стороны
+      //   парсера.
+      auto file = ViewedFile(uri);
 
-  client_endpoint.registerHandler([&](const td_documentColor::request& request) {
-    std::string doc_path = request.params.textDocument.uri.GetAbsolutePath().path;
-    std::vector<ColorInformation> coloring;
-
-    decltype(ast_cache)::iterator ast_it = ast_cache.find(doc_path);
-    if (ast_it != ast_cache.end()) {
-        Module& module = ast_it->second;
-        // module.
-    } else {
+      auto result = file_cache.insert({uri.raw_uri_, std::move(file)});
+      assert(result.second);
+      file_it = std::move(result.first);
     }
 
-    td_documentColor::response response;
+    return file_it->second;
+  };
+
+  client_endpoint.registerHandler([&](const td_symbol::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    td_symbol::response response;
     response.id = request.id;
-    response.result = std::move(coloring);
+    response.result = file.symbols;
     return response;
   });
 
