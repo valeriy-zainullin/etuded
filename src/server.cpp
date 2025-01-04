@@ -18,6 +18,7 @@
 #include "LibLsp/lsp/general/exit.h"
 #include "LibLsp/lsp/textDocument/did_open.h"
 #include "LibLsp/lsp/textDocument/document_symbol.h"
+#include "LibLsp/lsp/textDocument/declaration_definition.h"
 #include "LibLsp/lsp/lsTextDocumentIdentifier.h" // Missing include inside of did_close.h, okay...
 #include "LibLsp/lsp/lsDocumentUri.h"
 #include "LibLsp/lsp/textDocument/did_close.h"
@@ -58,7 +59,7 @@ public:
 
       symbols.clear();
 
-      LSPVisitor visitor(uri_, &symbols);
+      LSPVisitor visitor(std::string(path_), &symbols);
       driver.RunVisitor(&visitor);
   }
 private:
@@ -103,7 +104,8 @@ int main(int argc, char** argv) {
     
     response.id = request.id;
     response.result.capabilities = lsServerCapabilities {
-        .documentSymbolProvider = {{true, {}}}
+        .definitionProvider = {{true, {}}},
+        .documentSymbolProvider = {{true, {}}},
     };
 
     return response;
@@ -140,6 +142,13 @@ int main(int argc, char** argv) {
     td_symbol::response response;
     response.id = request.id;
     response.result = file.symbols;
+    return response;
+  });
+
+  client_endpoint.registerHandler([&](const td_declaration::request& request) {
+    td_declaration::response response;
+    response.id = request.id;
+    response.result;
     return response;
   });
 

@@ -1,8 +1,17 @@
 #include "lsp_visitor.hpp"
 
 #include <cassert>
+#include <cstddef>
 
+// LibLsp.
+#include "LibLsp/lsp/lsDocumentUri.h"
+#include "LibLsp/lsp/textDocument/document_symbol.h"
 #include "LibLsp/lsp/lsRange.h"
+#include "LibLsp/lsp/lsPosition.h"
+
+// Etude compiler.
+#include "driver/compil_driver.hpp"
+#include "driver/module.hpp"
 
 lsRange LSPVisitor::TokenToLsRange(const lex::Token& token) {
   // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
@@ -51,6 +60,24 @@ void LSPVisitor::VisitExprStatement(ExprStatement* node) {
 }
 
 // Declarations
+
+void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
+  symbols_->push_back(lsDocumentSymbol{
+    kind: lsSymbolKind::Variable,
+    range: TokenToLsRange(node->lvalue_->name_),
+  });
+
+  int line = static_cast<int>(node->lvalue_->name_.location.lineno);
+  int col = static_cast<int>(node->lvalue_->name_.location.columnno);
+  usages_->push_back(Usage{
+    range: TokenToLsRange(node->lvalue_->name_),
+    declared_at: {
+      path: file_path_,
+      position: lsPosition(line, col),
+    }
+  });
+}
+
 
 // Patterns
 
