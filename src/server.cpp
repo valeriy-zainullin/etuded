@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
 #include <filesystem>
 #include <condition_variable>
@@ -59,7 +60,7 @@ public:
 
       symbols.clear();
 
-      LSPVisitor visitor(std::string(path_), &symbols);
+      LSPVisitor visitor(std::string(path_), &symbols, &usages);
       driver.RunVisitor(&visitor);
   }
 private:
@@ -72,6 +73,7 @@ public:
   fs::path path_;
 
   std::vector<lsDocumentSymbol> symbols;
+  std::vector<SymbolUsage> usages;
 };
 
 std::unordered_map<std::string, ViewedFile> file_cache;
@@ -84,8 +86,9 @@ int main(int argc, char** argv) {
 
   fs::path exec_path = fs::absolute(fs::path(argv[0]));
   fs::path exec_dir  = exec_path.parent_path();
-  fs::path compiler_path  = exec_dir / "etude" / "123";
-  // TODO: figure out compiler path!
+  fs::path stdlib_path  = exec_dir / "etude_stdlib";
+  // Makes a copy of strings pointed by name and value.
+  setenv("ETUDE_STDLIB", std::string(stdlib_path).c_str(), true);
 
   std::atomic<bool> initialized = false;
   std::atomic<bool> exiting = false;
@@ -96,7 +99,7 @@ int main(int argc, char** argv) {
   // TODO: handlers.
 
   auto json_handler = std::make_shared<lsp::ProtocolJsonHandler>();
-  RemoteEndPoint client_endpoint(json_handler, server_endpoint, logger);
+  RemoteEndPoint client_endpoint(json_handler, server_endpoint, logger, lsp::Standard, 1);
 
   // https://github.com/kuafuwang/LspCpp/blob/e0b443d42e7d23638d727ac8ef6839b9e527bf0a/examples/StdIOServerExample.cpp#L57
   client_endpoint.registerHandler([&](const td_initialize::request& request) {
@@ -106,6 +109,7 @@ int main(int argc, char** argv) {
     response.result.capabilities = lsServerCapabilities {
         .definitionProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
+        .documentLinkProvider = lsDocumentLinkOptions {},
     };
 
     return response;
@@ -145,10 +149,49 @@ int main(int argc, char** argv) {
     return response;
   });
 
-  client_endpoint.registerHandler([&](const td_declaration::request& request) {
-    td_declaration::response response;
+  client_endpoint.registerHandler([&](const td_definition::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    SymbolUsage* usage = nullptr;
+    const lsPosition& editor_pos = request.params.position;
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.range.start.line != editor_pos.line) {
+        continue;
+      }
+
+      // Разрешаем равенство, т.к. можно встать сразу после символа,
+      //   это все еще разрешено. И после токена обычно пробельный символ,
+      //   потому все ок.
+      if (
+        usage_item.range.start.character <= editor_pos.character &&
+        editor_pos.character <= usage_item.range.end.character
+      ) {
+        assert(
+          usage == nullptr &&
+          "BUG: usages overlap (requested position is in both)."
+        );
+        usage = &usage_item;
+      }
+    }
+
+    std::vector<LocationLink> locations; 
+    if (usage != nullptr) {
+      // Distinguish decl and def positions like done in cquery:
+      //    https://github.com/jacobdufault/cquery/blob/9b80917cbf7d26b78ec62b409442ecf96f72daf9/src/messages/text_document_definition.cc#L96
+      locations.push_back(LocationLink {
+        targetUri: lsDocumentUri::FromPath(usage->declared_at.path),
+        targetRange: lsRange(usage->declared_at.decl_position, usage->declared_at.decl_position),
+        targetSelectionRange: lsRange(usage->declared_at.decl_position, usage->declared_at.decl_position),
+      });
+    }
+
+    td_definition::response response;
     response.id = request.id;
-    response.result;
+    response.result = {{}, locations};
+
     return response;
   });
 

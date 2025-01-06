@@ -3,11 +3,11 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(etude-lsp-server)
 set(CMAKE_CXX_STANDARD 20)
 
-# add_compile_options(-fsanitize=address,undefined)
-# add_link_options(-fsanitize=address,undefined)
+add_compile_options(-fsanitize=address,undefined)
+add_link_options(-fsanitize=address,undefined)
 
-add_compile_options(-fsanitize=thread)
-add_link_options(-fsanitize=thread)
+# add_compile_options(-fsanitize=thread)
+# add_link_options(-fsanitize=thread)
 
 include(cmake/CPM.cmake)
 
