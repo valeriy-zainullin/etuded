@@ -23,6 +23,7 @@
 #include "LibLsp/lsp/lsTextDocumentIdentifier.h" // Missing include inside of did_close.h, okay...
 #include "LibLsp/lsp/lsDocumentUri.h"
 #include "LibLsp/lsp/textDocument/did_close.h"
+#include "LibLsp/lsp/textDocument/publishDiagnostics.h"
 
 // Etude compiler.
 #include "driver/compil_driver.hpp"
@@ -56,11 +57,20 @@ public:
       //   этой функции, потому что compilation driver
       //   принимает эту строку как std::string_view.
       CompilationDriver driver(module_name);
-      driver.PrepareForTooling();
 
-      symbols.clear();
+      try {
+        driver.PrepareForTooling();
+      } catch (const std::exception& exc) {
+        diagnostic = std::string(exc.what());
+        return;
+      }
 
       LSPVisitor visitor(std::string(path_), &symbols, &usages);
+
+      symbols.clear();
+      usages.clear();
+      diagnostic.reset();
+
       driver.RunVisitor(&visitor);
   }
 private:
@@ -72,6 +82,7 @@ public:
   lsDocumentUri uri_;
   fs::path path_;
 
+  std::optional<std::string> diagnostic;
   std::vector<lsDocumentSymbol> symbols;
   std::vector<SymbolUsage> usages;
 };
@@ -131,12 +142,41 @@ int main(int argc, char** argv) {
       //   парсера.
       auto file = ViewedFile(uri);
 
-      auto result = file_cache.insert({uri.raw_uri_, std::move(file)});
+      // Решил использовать абсолютный путь. Потому что там выставляется
+      //   правильный регистр букв. В случае нечувствительной к регистру
+      //   файловой системы (можно при создании раздела выбирать разные
+      //   опции) можно обращаться к файлу путями и со всеми строчными,
+      //   и со всеми прописными буквами. Если вдруг language client
+      //   будет слать разные пути в таком случае, можем не найти
+      //   открытый файл, когда он есть. На всякий случай, в общем,
+      //   так надежнее. 
+
+      auto result = file_cache.insert({uri.GetAbsolutePath().path, std::move(file)});
       assert(result.second);
       file_it = std::move(result.first);
     }
 
     return file_it->second;
+  };
+
+  auto close_file = [&](const lsDocumentUri& uri) {
+    file_cache.erase(uri.GetAbsolutePath().path);
+  };
+
+  auto publish_diagnostics = [&](const ViewedFile& file) {
+    if (!file.diagnostic.has_value()) {
+      return;
+    }
+
+    Notify_TextDocumentPublishDiagnostics::notify notify;
+    notify.params.uri = file.uri_;
+    notify.params.diagnostics.push_back(lsDiagnostic{
+      range: lsRange{lsPosition{0, 0}, lsPosition{0, 0}},
+      severity: lsDiagnosticSeverity::Error,
+      message: file.diagnostic.value(),
+    });
+
+    client_endpoint.sendNotification(notify);
   };
 
   client_endpoint.registerHandler([&](const td_symbol::request& request) {
@@ -145,13 +185,25 @@ int main(int argc, char** argv) {
 
     td_symbol::response response;
     response.id = request.id;
-    response.result = file.symbols;
+    if (!file.diagnostic.has_value()) {
+      response.result = file.symbols;
+    } else {
+      publish_diagnostics(file);
+    }
     return response;
   });
 
   client_endpoint.registerHandler([&](const td_definition::request& request) {
     auto& file_uri = request.params.textDocument.uri;
     ViewedFile& file = find_file(file_uri);
+
+    td_definition::response response;
+    response.id = request.id;
+
+    if (file.diagnostic.has_value()) {
+      publish_diagnostics(file);
+      return response;
+    }
 
     SymbolUsage* usage = nullptr;
     const lsPosition& editor_pos = request.params.position;
@@ -188,8 +240,6 @@ int main(int argc, char** argv) {
       });
     }
 
-    td_definition::response response;
-    response.id = request.id;
     response.result = {{}, locations};
 
     return response;
@@ -208,8 +258,15 @@ int main(int argc, char** argv) {
     if (!initialized) {
         return;
     }
-    // Т.е. перед нами может быть даже не локальный файл, а на удаленном компьютере!
     logger.log(lsp::Log::Level::INFO, "opened file with uri " + notify.params.textDocument.uri.raw_uri_);
+  });
+
+  client_endpoint.registerHandler([&](Notify_TextDocumentDidClose::notify& notify) {
+    if (!initialized) {
+        return;
+    }
+    logger.log(lsp::Log::Level::INFO, "closing file with uri " + notify.params.textDocument.uri.raw_uri_);
+    close_file(notify.params.textDocument.uri);
   });
 
   auto input  = std::static_pointer_cast<lsp::istream>(std::make_shared<istream<decltype(std::cin)>>(std::cin));

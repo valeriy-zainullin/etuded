@@ -206,9 +206,8 @@ void LSPVisitor::VisitBlock(BlockExpression* node) {
 }
 
 void LSPVisitor::VisitFnCall(FnCallExpression* node) {
-  fmt::println("FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
+  fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
 }
-
 
 void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
   assert(node->layer_ != nullptr && "context builder is expected to have finished it's job");
