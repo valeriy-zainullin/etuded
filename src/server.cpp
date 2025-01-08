@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <memory>
 #include <variant>
+#include <sstream>
 
 // LibLsp.
 #include "LibLsp/lsp/AbsolutePath.h"
@@ -24,6 +25,9 @@
 #include "LibLsp/lsp/lsDocumentUri.h"
 #include "LibLsp/lsp/textDocument/did_close.h"
 #include "LibLsp/lsp/textDocument/publishDiagnostics.h"
+#include "LibLsp/lsp/textDocument/did_change.h"
+#include "LibLsp/lsp/textDocument/did_save.h"
+#include "LibLsp/lsp/utils.h"
 
 // Etude compiler.
 #include "driver/compil_driver.hpp"
@@ -33,11 +37,48 @@
 #include "lsp_visitor.hpp"
 
 namespace fs = std::filesystem;
+
+class LSPCompilationDriver final : public CompilationDriver {
+  using CompilationDriver::CompilationDriver;
+
+  virtual std::stringstream OpenFile(std::string_view name) override;
+
+public:
+  void PrepareForTooling() {
+    ParseAllModules();
+    RegisterSymbols();
+
+    // Those in the beginning have the least dependencies (see TopSort(...))
+    for (size_t i = 0; i < modules_.size(); i += 1) {
+      ProcessModule(&modules_[i]);
+    }
+
+    for (auto& m : modules_) {
+      m.InferTypes(solver_);
+    }
+
+    if (test_build) {
+      FMT_ASSERT(modules_.back().GetName() == main_module_,
+                  "Last module should be the main one");
+      return;
+    }
+  }
+  
+  void RunVisitor(Visitor* visitor) {
+    // Модуль, который был основным, находится в конце списка модулей
+    //   после тополнической сортировки. Т.к. в него все ребра входили,
+    //   но никакие не выходили: если кто-то его импортирует, мы об этом
+    //   не знаем.
+
+    modules_.back().RunTooling(visitor);
+  }
+};
+
 class ViewedFile {
 public:
   ViewedFile(lsDocumentUri uri)
-    : uri_(std::move(uri)), path_(uri_.GetAbsolutePath().path) {
-      assert(path_.is_absolute());
+    : uri_(std::move(uri)), abs_path_(uri_.GetAbsolutePath().path) {
+      assert(abs_path_.is_absolute());
 
       Invalidate();
   }
@@ -50,20 +91,20 @@ public:
       //   этого не зависят.
 
       // https://stackoverflow.com/a/57096619
-      fs::current_path(path_.parent_path());
+      fs::current_path(abs_path_.parent_path());
 
       std::string module_name = GetModuleName();
       diagnostic.reset();
 
       try {
-      // Важно, чтобы module_name существовал все время выполнения
-      //   этой функции, потому что compilation driver
-      //   принимает эту строку как std::string_view.
-      CompilationDriver driver(module_name);
+        // Важно, чтобы module_name существовал все время выполнения
+        //   этой функции, потому что compilation driver
+        //   принимает эту строку как std::string_view.
+        LSPCompilationDriver driver(module_name);
 
         driver.PrepareForTooling();
 
-        LSPVisitor visitor(std::string(path_), &symbols, &usages);
+        LSPVisitor visitor(std::string(abs_path_), &symbols, &usages);
 
         symbols.clear();
         usages.clear();
@@ -89,21 +130,54 @@ public:
         return;
       }
   }
+
+  void InvalidateOnLookup() {
+    invalidate_on_lookup = true;
+  }
+
+  void Lookup() {
+    if (invalidate_on_lookup) {
+      Invalidate();
+      invalidate_on_lookup = false;
+    }
+  }
 private:
   std::string GetModuleName() {
       // Module.et -> Module
-      return path_.filename().replace_extension();
+      return abs_path_.filename().replace_extension();
   }
 public:
   lsDocumentUri uri_;
-  fs::path path_;
+  fs::path abs_path_;
 
   std::optional<lsDiagnostic> diagnostic;
   std::vector<lsDocumentSymbol> symbols;
   std::vector<SymbolUsage> usages;
+
+  std::optional<std::string> unsaved_content;
+
+  bool invalidate_on_lookup = false;
 };
 
 std::unordered_map<std::string, ViewedFile> file_cache;
+
+std::stringstream LSPCompilationDriver::OpenFile(std::string_view name) {
+  auto rel_path = std::string(name) + ".et";
+
+  // Also forcing lowercase on windows.
+  // TODO: check vscode extension works on windows.
+  std::string abs_path = lsp::NormalizePath(rel_path, false);
+  auto it = file_cache.find(abs_path);
+  if (it != file_cache.end()) {
+    auto& file = it->second;
+
+    if (file.unsaved_content.has_value()) {
+      return std::stringstream(file.unsaved_content.value());
+    }
+  } 
+  
+  return CompilationDriver::OpenFile(name);
+}
 
 int main(int argc, char** argv) {
   if (argc < 1 || argv[0] == nullptr) {
@@ -134,6 +208,13 @@ int main(int argc, char** argv) {
     
     response.id = request.id;
     response.result.capabilities = lsServerCapabilities {
+        .textDocumentSync = {{{}, lsTextDocumentSyncOptions{
+          .openClose = true,
+          .change = lsTextDocumentSyncKind::Full,
+          .save = lsSaveOptions {
+            .includeText = false
+          },
+        }}},
         .definitionProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
         .documentLinkProvider = lsDocumentLinkOptions {},
@@ -142,8 +223,18 @@ int main(int argc, char** argv) {
     return response;
   });
 
+  auto update_diagnostics = [&](const ViewedFile& file) {
+    Notify_TextDocumentPublishDiagnostics::notify notify;
+    notify.params.uri = file.uri_;
+    if (file.diagnostic.has_value()) {
+      notify.params.diagnostics.push_back(file.diagnostic.value());
+    }
+
+    client_endpoint.sendNotification(notify);
+  };
+
   auto find_file = [&](const lsDocumentUri& uri) -> ViewedFile& {
-    auto file_it = file_cache.find(uri.raw_uri_);
+    auto file_it = file_cache.find(uri.GetAbsolutePath().path);
     if (file_it == file_cache.end()) {
       // Здесь произойдет разбор файла с путем doc_path.
       //   Внутри конструктора будет вызов Invalidate(), он
@@ -158,37 +249,39 @@ int main(int argc, char** argv) {
       //   парсера.
       auto file = ViewedFile(uri);
 
-      // Решил использовать абсолютный путь. Потому что там выставляется
-      //   правильный регистр букв. В случае нечувствительной к регистру
-      //   файловой системы (можно при создании раздела выбирать разные
-      //   опции) можно обращаться к файлу путями и со всеми строчными,
-      //   и со всеми прописными буквами. Если вдруг language client
-      //   будет слать разные пути в таком случае, можем не найти
-      //   открытый файл, когда он есть. На всякий случай, в общем,
-      //   так надежнее. 
+      // Нам нужен путь, т.к. при открытии файла мы смотрим
+      //   в этот кеш, удобнее оперировать путями, чем uri.
+      //   Возможно, именно мне сейчас..
+      // На windows все приводится к нижнему регистру,
+      //   внутри GetAbsolutePath() есть вызов
+      //   lsp::NormalizePath, там есть параметр
+      //   force_lower_on_windows. чтобы
+      //   не хранить один файл дважды. Ведь еще есть
+      //   чтение кеша при импортировании модулей внутри
+      //   etude. А там модули могут быть и большими,
+      //   и маленькими быть написаны. И на винде будет
+      //   компилироваться.. Тогда на винде просто везде
+      //   сделаем маленькими.
+      // На самом деле, это свойство файловой системы,
+      //   она может быть чувствительна или нет к регистру.
+      // Но все эти ухищрения только для случая, где
+      //   у кого-то неправильный регистр.
 
       auto result = file_cache.insert({uri.GetAbsolutePath().path, std::move(file)});
       assert(result.second);
       file_it = std::move(result.first);
     }
 
-    return file_it->second;
+    ViewedFile& file = file_it->second;
+
+    file.Lookup();
+    update_diagnostics(file); // Cheap, can do on each request or notification.
+
+    return file;
   };
 
   auto close_file = [&](const lsDocumentUri& uri) {
     file_cache.erase(uri.GetAbsolutePath().path);
-  };
-
-  auto publish_diagnostics = [&](const ViewedFile& file) {
-    if (!file.diagnostic.has_value()) {
-      return;
-    }
-
-    Notify_TextDocumentPublishDiagnostics::notify notify;
-    notify.params.uri = file.uri_;
-    notify.params.diagnostics.push_back(file.diagnostic.value());
-
-    client_endpoint.sendNotification(notify);
   };
 
   client_endpoint.registerHandler([&](const td_symbol::request& request) {
@@ -199,8 +292,6 @@ int main(int argc, char** argv) {
     response.id = request.id;
     if (!file.diagnostic.has_value()) {
       response.result = file.symbols;
-    } else {
-      publish_diagnostics(file);
     }
     return response;
   });
@@ -213,7 +304,6 @@ int main(int argc, char** argv) {
     response.id = request.id;
 
     if (file.diagnostic.has_value()) {
-      publish_diagnostics(file);
       return response;
     }
 
@@ -270,7 +360,50 @@ int main(int argc, char** argv) {
     if (!initialized) {
         return;
     }
+    
+    auto& file_uri = notify.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
     logger.log(lsp::Log::Level::INFO, "opened file with uri " + notify.params.textDocument.uri.raw_uri_);
+  });
+
+  client_endpoint.registerHandler([&](Notify_TextDocumentDidChange::notify& notify) {
+    if (!initialized) {
+        return;
+    }
+
+    if (notify.params.contentChanges.empty()) {
+      logger.warning("didChange event without contentChanges for file " + notify.params.textDocument.uri.GetAbsolutePath().path);
+      return;      
+    }
+
+    auto& file_uri = notify.params.textDocument.uri;
+    ViewedFile& target_file = find_file(file_uri);
+
+    target_file.unsaved_content = notify.params.contentChanges.back().text;
+    target_file.Invalidate();
+    update_diagnostics(target_file);
+
+    for (auto& [_, file]: file_cache) {
+      if (file.abs_path_ == target_file.abs_path_) {
+        // Already re-evaluated, avoid unnecessary work.
+        continue;
+      }
+
+      file.InvalidateOnLookup();
+    }
+  });
+
+  client_endpoint.registerHandler([&](Notify_TextDocumentDidSave::notify& notify) {
+    if (!initialized) {
+        return;
+    }
+
+    auto& file_uri = notify.params.textDocument.uri;
+    ViewedFile& target_file = find_file(file_uri);
+
+    // Now we can read just from the fs.
+    target_file.unsaved_content.reset();
   });
 
   client_endpoint.registerHandler([&](Notify_TextDocumentDidClose::notify& notify) {
