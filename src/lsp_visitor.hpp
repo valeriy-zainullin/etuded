@@ -10,6 +10,7 @@
 #include "LibLsp/lsp/lsDocumentUri.h"
 #include "LibLsp/lsp/textDocument/document_symbol.h"
 #include "LibLsp/lsp/lsRange.h"
+#include "LibLsp/lsp/utils.h"
 
 // Etude compiler.
 #include "driver/compil_driver.hpp"
@@ -18,7 +19,7 @@
 struct SymbolUsage {
   lsRange range;
 
-  struct {
+  struct SymbolDeclDefInfo {
     // Function, type or variable was imported, if it is from another module.
     //   But then it was declared in that module we import it from
     //   Declaration and definition always reside in the same module.
@@ -26,6 +27,22 @@ struct SymbolUsage {
     std::string path;
     lsPosition decl_position;
     lsPosition def_position;
+
+    bool operator==(const SymbolDeclDefInfo& other) const {
+      if (lsp::NormalizePath(path, false) != lsp::NormalizePath(other.path, false)) {
+        return false;
+      }
+
+      if (decl_position != other.decl_position) {
+        return false;
+      }
+
+      if (def_position != other.def_position) {
+        return false;
+      }
+
+      return true;
+    }
   } declared_at;
 
   bool is_decl = false;

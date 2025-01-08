@@ -27,6 +27,7 @@
 #include "LibLsp/lsp/textDocument/publishDiagnostics.h"
 #include "LibLsp/lsp/textDocument/did_change.h"
 #include "LibLsp/lsp/textDocument/did_save.h"
+#include "LibLsp/lsp/textDocument/highlight.h"
 #include "LibLsp/lsp/utils.h"
 
 // Etude compiler.
@@ -89,6 +90,11 @@ public:
       //   которую он найдет и так, если мы укажем переменную окружения.
       //   Потому сменим рабочую директорию. Другие части нашего кода от
       //   этого не зависят.
+
+      // Это и упрощение логики являются причинами однопоточного подхода.
+      //   Его производительности хватает, а сложности, которые он
+      //   создаст, в алгоритма и внутри компилятора (там есть 
+      //   глобальные переменные) перевешивают необходимость.
 
       // https://stackoverflow.com/a/57096619
       fs::current_path(abs_path_.parent_path());
@@ -216,6 +222,7 @@ int main(int argc, char** argv) {
           },
         }}},
         .definitionProvider = {{true, {}}},
+        .documentHighlightProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
         .documentLinkProvider = lsDocumentLinkOptions {},
     };
@@ -347,6 +354,55 @@ int main(int argc, char** argv) {
     return response;
   });
 
+  client_endpoint.registerHandler([&](const td_highlight::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    td_highlight::response response;
+    response.id = request.id;
+
+    if (file.diagnostic.has_value()) {
+      return response;
+    }
+
+    SymbolUsage* usage = nullptr;
+    const lsPosition& editor_pos = request.params.position;
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.range.start.line != editor_pos.line) {
+        continue;
+      }
+
+      // Разрешаем равенство, т.к. можно встать сразу после символа,
+      //   это все еще разрешено. И после токена обычно пробельный символ,
+      //   потому все ок.
+      if (
+        usage_item.range.start.character <= editor_pos.character &&
+        editor_pos.character <= usage_item.range.end.character
+      ) {
+        assert(
+          usage == nullptr &&
+          "BUG: usages overlap (requested position is in both)."
+        );
+        usage = &usage_item;
+      }
+    }
+
+    std::vector<lsDocumentHighlight> highlights; 
+    if (usage != nullptr) {
+      for (auto& usage_item: file.usages) {
+        if (usage_item.declared_at == usage->declared_at) {
+          highlights.push_back(lsDocumentHighlight{usage_item.range});          
+        }
+      }
+    }
+
+    response.result = std::move(highlights);
+
+    return response;
+  });
+
   client_endpoint.registerHandler([&](Notify_InitializedNotification::notify& notify) {
     initialized.store(true);
   });
@@ -411,6 +467,7 @@ int main(int argc, char** argv) {
         return;
     }
     logger.log(lsp::Log::Level::INFO, "closing file with uri " + notify.params.textDocument.uri.raw_uri_);
+    // Editor asks what to save pending changes in the file before closing.
     close_file(notify.params.textDocument.uri);
   });
 
