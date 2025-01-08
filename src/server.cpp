@@ -53,25 +53,41 @@ public:
       fs::current_path(path_.parent_path());
 
       std::string module_name = GetModuleName();
+      diagnostic.reset();
+
+      try {
       // Важно, чтобы module_name существовал все время выполнения
       //   этой функции, потому что compilation driver
       //   принимает эту строку как std::string_view.
       CompilationDriver driver(module_name);
 
-      try {
         driver.PrepareForTooling();
+
+        LSPVisitor visitor(std::string(path_), &symbols, &usages);
+
+        symbols.clear();
+        usages.clear();
+        diagnostic.reset();
+
+        driver.RunVisitor(&visitor);
+      } catch (const ErrorAtLocation& err) {
+        diagnostic = lsDiagnostic{
+          range: lsRange{
+            LsPositionFromLexLocation(err.where()),
+            LsPositionFromLexLocation(err.where())
+          },
+          severity: lsDiagnosticSeverity::Error,
+          message: std::string(err.what()),
+        };
+        return;
       } catch (const std::exception& exc) {
-        diagnostic = std::string(exc.what());
+        diagnostic = lsDiagnostic{
+          range: lsRange{lsPosition{0, 0}, lsPosition{0, 0}},
+          severity: lsDiagnosticSeverity::Error,
+          message: std::string(exc.what()),
+        };
         return;
       }
-
-      LSPVisitor visitor(std::string(path_), &symbols, &usages);
-
-      symbols.clear();
-      usages.clear();
-      diagnostic.reset();
-
-      driver.RunVisitor(&visitor);
   }
 private:
   std::string GetModuleName() {
@@ -82,7 +98,7 @@ public:
   lsDocumentUri uri_;
   fs::path path_;
 
-  std::optional<std::string> diagnostic;
+  std::optional<lsDiagnostic> diagnostic;
   std::vector<lsDocumentSymbol> symbols;
   std::vector<SymbolUsage> usages;
 };
@@ -170,11 +186,7 @@ int main(int argc, char** argv) {
 
     Notify_TextDocumentPublishDiagnostics::notify notify;
     notify.params.uri = file.uri_;
-    notify.params.diagnostics.push_back(lsDiagnostic{
-      range: lsRange{lsPosition{0, 0}, lsPosition{0, 0}},
-      severity: lsDiagnosticSeverity::Error,
-      message: file.diagnostic.value(),
-    });
+    notify.params.diagnostics.push_back(file.diagnostic.value());
 
     client_endpoint.sendNotification(notify);
   };

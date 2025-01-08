@@ -13,37 +13,6 @@
 #include "driver/compil_driver.hpp"
 #include "driver/module.hpp"
 
-static lsPosition PositionFromLexLocation(const lex::Location& location) {
-  // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
-  //   IDE с большой вероятностью будет сильно тормозить.
-  assert(token.location.lineno   >= 0);
-  assert(token.location.columnno >= 1); // Позиция после последнего символа. Храним правую границу полуинтервала [start, end).
-  assert(token.location.lineno   <= std::numeric_limits<int>::max());
-  assert(token.location.columnno <= std::numeric_limits<int>::max());
-
-  return {static_cast<int>(location.lineno), static_cast<int>(location.columnno)};
-}
-
-
-lsRange LSPVisitor::TokenToLsRange(const lex::Token& token) {
-  // Позиция токена -- номер строки и столбца сразу после него.
-  //   Все токены однострочные, перевод строки разделяет токены.
-  assert(token.location.columnno >= token.length());
-
-  int line = static_cast<int>(token.location.lineno);
-  int col  = static_cast<int>(token.location.columnno);
-
-  lsPosition end = PositionFromLexLocation(token.location);
-  lsPosition start = end;
-  start.character -= static_cast<int>(token.length());
-
-  fmt::println(stderr, "TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
-
-  // Exclusive like range in editor.
-  // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range
-  return lsRange{std::move(start), std::move(end)};
-}
-
 // Statements
 
 void LSPVisitor::VisitYield(YieldStatement* node) {
@@ -67,19 +36,19 @@ void LSPVisitor::VisitExprStatement(ExprStatement* node) {
 
 void LSPVisitor::VisitTypeDecl(TypeDeclStatement* node) {
   usages_->push_back(SymbolUsage{
-    range: TokenToLsRange(node->name_),
+    range: LsRangeFromLexToken(node->name_),
     declared_at: {
       path: file_path_,
-      decl_position: PositionFromLexLocation(node->name_.location),
-      def_position: PositionFromLexLocation(node->name_.location),
+      decl_position: LsPositionFromLexLocation(node->name_.location),
+      def_position: LsPositionFromLexLocation(node->name_.location),
     }
   });
 
   symbols_->push_back(lsDocumentSymbol{
     name: std::string(node->name_.GetName()),
     kind: lsSymbolKind::TypeAlias,
-    range: TokenToLsRange(node->name_),
-    selectionRange: TokenToLsRange(node->name_),
+    range: LsRangeFromLexToken(node->name_),
+    selectionRange: LsRangeFromLexToken(node->name_),
   });
 }
 
@@ -88,16 +57,16 @@ void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
   symbols_->push_back(lsDocumentSymbol{
     name: std::string(node->lvalue_->GetName()),
     kind: lsSymbolKind::Variable,
-    range: TokenToLsRange(node->lvalue_->name_),
-    selectionRange: TokenToLsRange(node->lvalue_->name_),
+    range: LsRangeFromLexToken(node->lvalue_->name_),
+    selectionRange: LsRangeFromLexToken(node->lvalue_->name_),
   });
 
   usages_->push_back(SymbolUsage{
-    range: TokenToLsRange(node->lvalue_->name_),
+    range: LsRangeFromLexToken(node->lvalue_->name_),
     declared_at: {
       path: file_path_,
-      decl_position: PositionFromLexLocation(node->lvalue_->name_.location),
-      def_position: PositionFromLexLocation(node->lvalue_->name_.location),
+      decl_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
+      def_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
     }
   });
 }
@@ -111,11 +80,11 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
   if (!node->trait_method_) {
     // TODO: mark as definition if it is in fact definition, not only declaration.
     usages_->push_back(SymbolUsage{
-      range: TokenToLsRange(node->name_),
+      range: LsRangeFromLexToken(node->name_),
       declared_at: {
         path: file_path_,
-        decl_position: PositionFromLexLocation(node->name_.location),
-        def_position: PositionFromLexLocation(node->name_.location),
+        decl_position: LsPositionFromLexLocation(node->name_.location),
+        def_position: LsPositionFromLexLocation(node->name_.location),
       }
     });
   }
@@ -125,8 +94,8 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
     symbols_->push_back(lsDocumentSymbol{
       name: std::string(node->name_.GetName()),
       kind: lsSymbolKind::Variable,
-      range: lsRange(TokenToLsRange(node->name_).start, PositionFromLexLocation(node->body_->GetLocation())),
-      selectionRange: TokenToLsRange(node->name_),
+      range: lsRange(LsRangeFromLexToken(node->name_).start, LsPositionFromLexLocation(node->body_->GetLocation())),
+      selectionRange: LsRangeFromLexToken(node->name_),
     });
 
     // auto symbol = current_context_->RetrieveSymbol(node->GetName());
@@ -140,14 +109,14 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
       symbols_->push_back(lsDocumentSymbol{
         name: std::string(param.GetName()),
         kind: lsSymbolKind::Variable,
-        range: TokenToLsRange(param),
-        selectionRange: TokenToLsRange(param),
+        range: LsRangeFromLexToken(param),
+        selectionRange: LsRangeFromLexToken(param),
       });
 
       int line = static_cast<int>(param.location.lineno);
       int col = static_cast<int>(param.location.columnno);
       usages_->push_back(SymbolUsage{
-        range: TokenToLsRange(param),
+        range: LsRangeFromLexToken(param),
         declared_at: {
           path: file_path_,
           decl_position: lsPosition(line, col),
@@ -162,8 +131,8 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
     symbols_->push_back(lsDocumentSymbol{
       name: std::string(node->name_.GetName()),
       kind: lsSymbolKind::Variable,
-      range: TokenToLsRange(node->name_),
-      selectionRange: TokenToLsRange(node->name_),
+      range: LsRangeFromLexToken(node->name_),
+      selectionRange: LsRangeFromLexToken(node->name_),
     });
   }
 }
@@ -217,11 +186,11 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
   );
   if (symbol != nullptr) {
     usages_->push_back(SymbolUsage{
-      range: TokenToLsRange(node->name_),
+      range: LsRangeFromLexToken(node->name_),
       declared_at: {
         path: symbol->declared_at.unit.GetPath(),
-        decl_position: PositionFromLexLocation(symbol->declared_at.position),
-        def_position: PositionFromLexLocation(symbol->declared_at.position),
+        decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
+        def_position: LsPositionFromLexLocation(symbol->declared_at.position),
       }
     });
   }
@@ -229,8 +198,8 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
   symbols_->push_back(lsDocumentSymbol{
     name: std::string(node->name_.GetName()),
     kind: lsSymbolKind::Variable,
-    range: TokenToLsRange(node->name_),
-    selectionRange: TokenToLsRange(node->name_),
+    range: LsRangeFromLexToken(node->name_),
+    selectionRange: LsRangeFromLexToken(node->name_),
   });
 }
 

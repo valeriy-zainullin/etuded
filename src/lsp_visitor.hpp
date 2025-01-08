@@ -32,6 +32,36 @@ struct SymbolUsage {
   bool is_def = false;
 };
 
+inline lsPosition LsPositionFromLexLocation(const lex::Location& location) {
+  // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
+  //   IDE с большой вероятностью будет сильно тормозить.
+  assert(token.location.lineno   >= 0);
+  assert(token.location.columnno >= 1); // Позиция после последнего символа. Храним правую границу полуинтервала [start, end).
+  assert(token.location.lineno   <= std::numeric_limits<int>::max());
+  assert(token.location.columnno <= std::numeric_limits<int>::max());
+
+  return {static_cast<int>(location.lineno), static_cast<int>(location.columnno)};
+}
+
+inline lsRange LsRangeFromLexToken(const lex::Token& token) {
+  // Позиция токена -- номер строки и столбца сразу после него.
+  //   Все токены однострочные, перевод строки разделяет токены.
+  assert(token.location.columnno >= token.length());
+
+  int line = static_cast<int>(token.location.lineno);
+  int col  = static_cast<int>(token.location.columnno);
+
+  lsPosition end = LsPositionFromLexLocation(token.location);
+  lsPosition start = end;
+  start.character -= static_cast<int>(token.length());
+
+  fmt::println(stderr, "TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
+
+  // Exclusive like range in editor.
+  // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range
+  return lsRange{std::move(start), std::move(end)};
+}
+
 
 class LSPVisitor: public Visitor {
 public:
