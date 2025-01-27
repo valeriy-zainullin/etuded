@@ -140,7 +140,7 @@ public:
   void VisitFnCall(FnCallExpression* node) override;
   void VisitIntrinsic(IntrinsicCall* node) override {}
   void VisitCompoundInitalizer(CompoundInitializerExpr* node) override {}
-  void VisitFieldAccess(FieldAccessExpression* node) override {}
+  void VisitFieldAccess(FieldAccessExpression* node) override;
   void VisitVarAccess(VarAccessExpression* node) override;
   void VisitLiteral(LiteralExpression* node) override {}
   void VisitTypecast(TypecastExpression* node) override {}

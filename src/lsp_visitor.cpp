@@ -50,6 +50,10 @@ void LSPVisitor::VisitTypeDecl(TypeDeclStatement* node) {
     range: LsRangeFromLexToken(node->name_),
     selectionRange: LsRangeFromLexToken(node->name_),
   });
+
+  // TODO: also check what type variant it really is and
+  //   store it's symbol declarations in the symbol vector
+  //   (not in the symboltable).
 }
 
 
@@ -176,6 +180,29 @@ void LSPVisitor::VisitBlock(BlockExpression* node) {
 
 void LSPVisitor::VisitFnCall(FnCallExpression* node) {
   fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
+}
+
+void LSPVisitor::VisitFieldAccess(FieldAccessExpression* node) {
+  node->struct_expression_->Accept(this);
+
+  types::Type* struct_type = node->struct_expression_->GetType();
+
+  for (const types::Member& member: struct_type->as_struct.first) {
+    if (member.field == node->field_name_) {
+      usages_->push_back(SymbolUsage{
+        range: LsRangeFromLexToken(member.name),
+        declared_at: {
+          path: symbol->declared_at.unit.GetPath(),
+          decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
+          def_position: LsPositionFromLexLocation(symbol->declared_at.position),
+        }
+      });
+
+      break;
+    }
+  }
+
+  node->field_name_
 }
 
 void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
