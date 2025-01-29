@@ -52,10 +52,10 @@ struct SymbolUsage {
 inline lsPosition LsPositionFromLexLocation(const lex::Location& location) {
   // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
   //   IDE с большой вероятностью будет сильно тормозить.
-  assert(token.location.lineno   >= 0);
-  assert(token.location.columnno >= 1); // Позиция после последнего символа. Храним правую границу полуинтервала [start, end).
-  assert(token.location.lineno   <= std::numeric_limits<int>::max());
-  assert(token.location.columnno <= std::numeric_limits<int>::max());
+  assert(location.lineno   >= 0);
+  assert(location.columnno >= 1); // Позиция после последнего символа. Храним правую границу полуинтервала [start, end).
+  assert(location.lineno   <= std::numeric_limits<int>::max());
+  assert(location.columnno <= std::numeric_limits<int>::max());
 
   return {static_cast<int>(location.lineno), static_cast<int>(location.columnno)};
 }
@@ -72,6 +72,8 @@ inline lsRange LsRangeFromLexToken(const lex::Token& token) {
   lsPosition start = end;
   start.character -= static_cast<int>(token.length());
 
+  // TODO: comment later. Useful in combination with visit functions logging.
+  //   Makes a clue what location is considered by the visitor at the moment.
   fmt::println(stderr, "TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
 
   // Exclusive like range in editor.
@@ -128,22 +130,22 @@ public:
 
   // Expressions
 
-  void VisitComparison(ComparisonExpression* node) override {}
+  void VisitComparison(ComparisonExpression* node) override { fmt::println(stderr, "DEBUG: VisitComparison was called"); }
   void VisitBinary(BinaryExpression* node) override;
   void VisitUnary(UnaryExpression* node) override;
-  void VisitDeref(DereferenceExpression* node) override {}
-  void VisitAddressof(AddressofExpression* node) override {}
+  void VisitDeref(DereferenceExpression* node) override;
+  void VisitAddressof(AddressofExpression* node) override { fmt::println(stderr, "DEBUG: VisitAddressof was called"); }
   void VisitIf(IfExpression* node) override;
-  void VisitMatch(MatchExpression* node) override {}
-  void VisitNew(NewExpression* node) override {}
+  void VisitMatch(MatchExpression* node) override { fmt::println(stderr, "DEBUG: VisitMatch was called"); }
+  void VisitNew(NewExpression* node) override { fmt::println(stderr, "DEBUG: VisitNew was called"); }
   void VisitBlock(BlockExpression* node) override;
   void VisitFnCall(FnCallExpression* node) override;
-  void VisitIntrinsic(IntrinsicCall* node) override {}
-  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override {}
+  void VisitIntrinsic(IntrinsicCall* node) override { fmt::println(stderr, "DEBUG: VisitIntrinsic was called"); }
+  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override { fmt::println(stderr, "DEBUG: VisitCompoundInitalizer was called"); }
   void VisitFieldAccess(FieldAccessExpression* node) override;
   void VisitVarAccess(VarAccessExpression* node) override;
-  void VisitLiteral(LiteralExpression* node) override {}
-  void VisitTypecast(TypecastExpression* node) override {}
+  void VisitLiteral(LiteralExpression* node) override { fmt::println(stderr, "DEBUG: VisitLiteral was called"); }
+  void VisitTypecast(TypecastExpression* node) override { fmt::println(stderr, "DEBUG: VisitLiteral was called"); }
 
 private:
   const std::string file_path_;

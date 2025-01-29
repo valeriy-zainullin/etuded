@@ -42,7 +42,7 @@ namespace fs = std::filesystem;
 class LSPCompilationDriver final : public CompilationDriver {
   using CompilationDriver::CompilationDriver;
 
-  virtual std::stringstream OpenFile(std::string_view name) override;
+  virtual lex::InputFile OpenFile(std::string_view name) override;
 
 public:
   void PrepareForTooling() {
@@ -51,15 +51,15 @@ public:
 
     // Those in the beginning have the least dependencies (see TopSort(...))
     for (size_t i = 0; i < modules_.size(); i += 1) {
-      ProcessModule(&modules_[i]);
+      ProcessModule(modules_[i].get());
     }
 
     for (auto& m : modules_) {
-      m.InferTypes(solver_);
+      m->InferTypes(solver_);
     }
 
     if (test_build) {
-      FMT_ASSERT(modules_.back().GetName() == main_module_,
+      FMT_ASSERT(modules_.back()->GetName() == main_module_,
                   "Last module should be the main one");
       return;
     }
@@ -71,7 +71,7 @@ public:
     //   но никакие не выходили: если кто-то его импортирует, мы об этом
     //   не знаем.
 
-    modules_.back().RunTooling(visitor);
+    modules_.back()->RunTooling(visitor);
   }
 };
 
@@ -167,10 +167,11 @@ public:
 
 std::unordered_map<std::string, ViewedFile> file_cache;
 
-std::stringstream LSPCompilationDriver::OpenFile(std::string_view name) {
+lex::InputFile LSPCompilationDriver::OpenFile(std::string_view name) {
   auto rel_path = std::string(name) + ".et";
 
-  // Also forcing lowercase on windows.
+  // Also forcing lowercase on windows. Because default fs there (ntfs)
+  //   is not case-sensitive.
   // TODO: check vscode extension works on windows.
   std::string abs_path = lsp::NormalizePath(rel_path, false);
   auto it = file_cache.find(abs_path);
@@ -178,7 +179,7 @@ std::stringstream LSPCompilationDriver::OpenFile(std::string_view name) {
     auto& file = it->second;
 
     if (file.unsaved_content.has_value()) {
-      return std::stringstream(file.unsaved_content.value());
+      return lex::InputFile{std::stringstream(file.unsaved_content.value()), std::move(abs_path)};
     }
   } 
   

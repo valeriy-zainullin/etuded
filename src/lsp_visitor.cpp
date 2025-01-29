@@ -155,6 +155,11 @@ void LSPVisitor::VisitUnary(UnaryExpression* node) {
   node->operand_->Accept(this);
 }
 
+void LSPVisitor::VisitDeref(DereferenceExpression* node) {
+  node->operand_->Accept(this);
+}
+
+
 
 void LSPVisitor::VisitIf(IfExpression* node) {
   assert(node->true_branch_ != nullptr);
@@ -185,24 +190,23 @@ void LSPVisitor::VisitFnCall(FnCallExpression* node) {
 void LSPVisitor::VisitFieldAccess(FieldAccessExpression* node) {
   node->struct_expression_->Accept(this);
 
-  types::Type* struct_type = node->struct_expression_->GetType();
+  types::Type* struct_type = TypeStorage(node->struct_expression_->GetType());
 
   for (const types::Member& member: struct_type->as_struct.first) {
-    if (member.field == node->field_name_) {
+    // fmt::println(stderr, "member name={}, expected {}", member.field, node->field_name_.GetName());
+    if (member.field == node->field_name_.GetName()) {
       usages_->push_back(SymbolUsage{
-        range: LsRangeFromLexToken(member.name),
+        range: LsRangeFromLexToken(node->field_name_),
         declared_at: {
-          path: symbol->declared_at.unit.GetPath(),
-          decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
-          def_position: LsPositionFromLexLocation(symbol->declared_at.position),
+          path: member.name.location.unit->GetAbsPath(),
+          decl_position: LsPositionFromLexLocation(member.name.location),
+          def_position: LsPositionFromLexLocation(member.name.location),
         }
       });
 
       break;
     }
   }
-
-  node->field_name_
 }
 
 void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
@@ -215,7 +219,7 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
     usages_->push_back(SymbolUsage{
       range: LsRangeFromLexToken(node->name_),
       declared_at: {
-        path: symbol->declared_at.unit.GetPath(),
+        path: symbol->declared_at.unit.GetAbsPath(),
         decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
         def_position: LsPositionFromLexLocation(symbol->declared_at.position),
       }
