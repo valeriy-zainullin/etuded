@@ -143,7 +143,7 @@ public:
   void VisitBlock(BlockExpression* node) override;
   void VisitFnCall(FnCallExpression* node) override;
   void VisitIntrinsic(IntrinsicCall* node) override { fmt::println(stderr, "DEBUG: VisitIntrinsic was called"); }
-  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override { fmt::println(stderr, "DEBUG: VisitCompoundInitalizer was called"); }
+  void VisitCompoundInitalizer(CompoundInitializerExpr* node) override;
   void VisitFieldAccess(FieldAccessExpression* node) override;
   void VisitVarAccess(VarAccessExpression* node) override;
   void VisitLiteral(LiteralExpression* node) override { fmt::println(stderr, "DEBUG: VisitLiteral was called"); }

@@ -233,10 +233,10 @@ void LSPVisitor::VisitVariantPat(VariantPattern* node) {
   // Хорошо бы найти определение этого элемента суммы типов.
   //   Можно сделать через типы.
 
-  types::Type* type = TypeStorage(node->type_);
+  types::Type* type = TypeStorage(node->GetType());
 
   // TODO.
-  fmt::println("");
+  //fmt::println("");
 
   // Все как у обращения к полю структуры.
   for (auto& member: type->as_sum.first) {
@@ -329,6 +329,51 @@ void LSPVisitor::VisitFnCall(FnCallExpression* node) {
 
   fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
 }
+
+void LSPVisitor::VisitCompoundInitalizer(CompoundInitializerExpr* node) {
+  #if TRACE_VISITOR
+    fmt::println(stderr, "TRACE: LSPVisitor::VisitCompoundInitalizer called.");
+  #endif
+
+  types::Type* type = TypeStorage(node->GetType());
+
+  std::vector<types::Member>* members = nullptr;
+  if (type->tag == types::TypeTag::TY_STRUCT) {
+    members = &type->as_struct.first;
+  } else if (type->tag == types::TypeTag::TY_SUM) {
+    members = &type->as_sum.first;
+  } else {
+    #if TRACE_VISITOR
+      fmt::println(stderr, "DEBUG: LSPVisitor::VisitCompoundInitalizer haven't found members to compound initialize..");
+    #endif
+  }
+
+  for (CompoundInitializerExpr::Member& initializer: node->initializers_) {
+    if (members != nullptr) {      
+      for (types::Member& member: *members) {
+        if (member.field == initializer.field) {
+          usages_->push_back(SymbolUsage{
+            range: LsRangeFromLexToken(initializer.name),
+            declared_at: {
+              path: member.name.location.unit->GetAbsPath(),
+              decl_position: LsPositionFromLexLocation(member.name.location),
+              def_position: LsPositionFromLexLocation(member.name.location),
+            }
+          });
+
+          break;
+        }
+      }
+    }
+
+    // May be missing. See parse_expr.cpp, ParseSignleFieldCompound function.
+    if (initializer.init != nullptr) {
+      initializer.init->Accept(this);
+    }
+  }
+
+}
+
 
 void LSPVisitor::VisitFieldAccess(FieldAccessExpression* node) {
   #if TRACE_VISITOR
