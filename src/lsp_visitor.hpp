@@ -72,9 +72,11 @@ inline lsRange LsRangeFromLexToken(const lex::Token& token) {
   lsPosition start = end;
   start.character -= static_cast<int>(token.length());
 
-  // TODO: comment later. Useful in combination with visit functions logging.
-  //   Makes a clue what location is considered by the visitor at the moment.
-  fmt::println(stderr, "TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
+  #if TRACE_VISITOR
+    // Useful in combination with visit functions logging.
+    //   Makes a clue what location is considered by the visitor at the moment.
+    fmt::println(stderr, "TokenToLSRange: TokenToLsRange ({}, {})-({}, {})", start.line, start.character, end.line, end.character);
+  #endif
 
   // Exclusive like range in editor.
   // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range
@@ -122,11 +124,11 @@ public:
 
   // Patterns
 
-  void VisitBindingPat(BindingPattern* node) override {}
-  void VisitDiscardingPat(DiscardingPattern* node) override {}
-  void VisitLiteralPat(LiteralPattern* node) override {}
-  void VisitStructPat(StructPattern* node) override {}
-  void VisitVariantPat(VariantPattern* node) override {}
+  void VisitBindingPat(BindingPattern* node) override;
+  void VisitDiscardingPat(DiscardingPattern* node) override;
+  void VisitLiteralPat(LiteralPattern* node) override;
+  void VisitStructPat(StructPattern* node) override;
+  void VisitVariantPat(VariantPattern* node) override;
 
   // Expressions
 
@@ -134,9 +136,9 @@ public:
   void VisitBinary(BinaryExpression* node) override;
   void VisitUnary(UnaryExpression* node) override;
   void VisitDeref(DereferenceExpression* node) override;
-  void VisitAddressof(AddressofExpression* node) override { fmt::println(stderr, "DEBUG: VisitAddressof was called"); }
+  void VisitAddressof(AddressofExpression* node) override;
   void VisitIf(IfExpression* node) override;
-  void VisitMatch(MatchExpression* node) override { fmt::println(stderr, "DEBUG: VisitMatch was called"); }
+  void VisitMatch(MatchExpression* node) override;
   void VisitNew(NewExpression* node) override { fmt::println(stderr, "DEBUG: VisitNew was called"); }
   void VisitBlock(BlockExpression* node) override;
   void VisitFnCall(FnCallExpression* node) override;
