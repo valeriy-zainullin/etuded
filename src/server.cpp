@@ -28,6 +28,7 @@
 #include "LibLsp/lsp/textDocument/did_change.h"
 #include "LibLsp/lsp/textDocument/did_save.h"
 #include "LibLsp/lsp/textDocument/highlight.h"
+#include "LibLsp/lsp/textDocument/hover.h"
 #include "LibLsp/lsp/utils.h"
 
 // Etude compiler.
@@ -222,6 +223,7 @@ int main(int argc, char** argv) {
             .includeText = false
           },
         }}},
+        .hoverProvider = {true},
         .definitionProvider = {{true, {}}},
         .documentHighlightProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
@@ -403,6 +405,49 @@ int main(int argc, char** argv) {
 
     return response;
   });
+
+  client_endpoint.registerHandler([&](const td_hover::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    td_hover::response response;
+    response.id = request.id;
+
+    if (file.diagnostic.has_value()) {
+      return response;
+    }
+
+    SymbolUsage* usage = nullptr;
+    const lsPosition& editor_pos = request.params.position;
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.range.start.line != editor_pos.line) {
+        continue;
+      }
+
+      // Разрешаем равенство, т.к. можно встать сразу после символа,
+      //   это все еще разрешено. И после токена обычно пробельный символ,
+      //   потому все ок.
+      if (
+        usage_item.range.start.character <= editor_pos.character &&
+        editor_pos.character <= usage_item.range.end.character
+      ) {
+        assert(
+          usage == nullptr &&
+          "BUG: usages overlap (requested position is in both)."
+        );
+        usage = &usage_item;
+      }
+
+      if (usage != nullptr && usage->type_name.has_value()) {
+        response.result.contents = {TextDocumentHover::Left{{{"of " + usage->type_name.value(), {}}}}, {}};
+        response.result.range = usage->range;
+      }
+    }
+    return response;
+  });
+
 
   client_endpoint.registerHandler([&](Notify_InitializedNotification::notify& notify) {
     initialized.store(true);

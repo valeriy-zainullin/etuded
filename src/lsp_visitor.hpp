@@ -45,6 +45,8 @@ struct SymbolUsage {
     }
   } declared_at;
 
+  std::optional<std::string> type_name;
+
   bool is_decl = false;
   bool is_def = false;
 };

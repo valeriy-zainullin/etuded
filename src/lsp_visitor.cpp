@@ -84,7 +84,8 @@ void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
       path: file_path_,
       decl_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
       def_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
-    }
+    },
+    type_name: node->value_->GetType()->Format(),
   });
 }
 
@@ -192,7 +193,8 @@ void LSPVisitor::VisitBindingPat(BindingPattern* node) {
       path: file_path_,
       decl_position: LsPositionFromLexLocation(node->name_.location),
       def_position: LsPositionFromLexLocation(node->name_.location),
-    }
+    },
+    type_name: node->type_->Format(),
   });
 }
 
@@ -247,7 +249,8 @@ void LSPVisitor::VisitVariantPat(VariantPattern* node) {
           path: member.name.location.unit->GetAbsPath(),
           decl_position: LsPositionFromLexLocation(member.name.location),
           def_position: LsPositionFromLexLocation(member.name.location),
-        }
+        },
+        type_name: type->Format(),
       });
     }
   }
@@ -358,7 +361,8 @@ void LSPVisitor::VisitCompoundInitalizer(CompoundInitializerExpr* node) {
               path: member.name.location.unit->GetAbsPath(),
               decl_position: LsPositionFromLexLocation(member.name.location),
               def_position: LsPositionFromLexLocation(member.name.location),
-            }
+            },
+            type_name: member.ty->Format(),
           });
 
           break;
@@ -393,7 +397,8 @@ void LSPVisitor::VisitFieldAccess(FieldAccessExpression* node) {
           path: member.name.location.unit->GetAbsPath(),
           decl_position: LsPositionFromLexLocation(member.name.location),
           def_position: LsPositionFromLexLocation(member.name.location),
-        }
+        },
+        type_name: node->GetType()->Format(),
       });
 
       break;
@@ -418,7 +423,8 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
         path: symbol->declared_at.unit.GetAbsPath(),
         decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
         def_position: LsPositionFromLexLocation(symbol->declared_at.position),
-      }
+      },
+      type_name: symbol->GetType()->Format(),
     });
   }
 
