@@ -2,11 +2,13 @@
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <filesystem>
 #include <condition_variable>
 #include <memory>
 #include <variant>
 #include <sstream>
+#include <unordered_map>
 
 // LibLsp.
 #include "LibLsp/lsp/AbsolutePath.h"
@@ -39,6 +41,128 @@
 #include "lsp_visitor.hpp"
 
 namespace fs = std::filesystem;
+
+#define TRACE_CONTENT_HOLDER 1
+#define TRACE_INVALIDATION 1
+
+struct EditedFile {
+  std::string content;
+  std::vector<size_t> line_starts;
+
+  // line is [line_starts[i], line_starts[i + 1] or file size, if eof is the boundary) bytes. That means
+  //   it includes line feed, bacause lines are adjacent, without gaps. Lines end with '\n', except the
+  //   last one (which could end with '\n', but not necessarily).
+  //   We could consider lines as text separated by '\n', but then we'd either store ends
+  //   as well or compute ends by subtracting one from the next line start, which seems
+  //   hacky.
+  // The last line does not necessarily end with a '\n'. If so, end-of-file ends active
+  //   line, without producing any more of them. Tbis is handled by the fact that
+  //   we add new lines upon '\n', but only if a new line will actually start. So
+  //   if the last line ends with '\n', we won't start a new line as a special case.
+
+  void set_content(std::string new_content) {
+    content = std::move(new_content);
+    line_starts.clear();
+    line_starts.push_back(0); // Первая строка начинается с первого байта.
+    find_line_starts(0);
+
+    #if TRACE_CONTENT_HOLDER
+      fmt::println(stderr, "content.size() = {}", content.size());
+      fmt::print(stderr, "line_starts = [");
+      for (const auto& item: line_starts) {
+        fmt::print(stderr, "{},", item);
+      }
+      fmt::println(stderr, "]");
+    #endif
+  }
+
+  static size_t length(size_t start, size_t end) {
+    return end - start;
+  }
+
+  void update_content(lsRange range, std::string replacement) {
+    assert(range.start.line < line_starts.size());
+    assert(range.end.line < line_starts.size());
+
+    #if TRACE_CONTENT_HOLDER
+      fmt::println(stderr, "content.size() = {}", content.size());
+      fmt::print(stderr, "line_starts = [");
+      for (const auto& item: line_starts) {
+        fmt::print(stderr, "{},", item);
+      }
+      fmt::println(stderr, "]");
+
+      fmt::println(
+        stderr,
+        "range.start.line = {}, range.end.line = {}, line_starts.size() = {}",
+        range.start.line,
+        range.end.line,
+        line_starts.size()
+      );
+    #endif
+    
+    size_t edited_start = line_starts[range.start.line] + range.start.character;
+    size_t edited_end = line_starts[range.end.line] + range.end.character;
+
+    assert(edited_start < content.size());
+    assert(edited_end < content.size());
+
+    if (length(edited_start, edited_end) < replacement.size()) {
+      // Чтобы не инвалидировать итераторы, расширим до их взятия.
+      size_t underflow = replacement.size() - length(edited_start, edited_end);
+      std::fill_n(std::back_inserter(content), underflow, '\0');
+    }
+
+    // Хотим перезаписать интервал новыми данными.
+
+    // Если интервал уменьшился, то переместим данные после него и сократим тем самым строку.
+    //   Данные интервала затем перезапишем новыми.
+    auto edited_start_it = content.begin() + edited_start;
+    auto edited_end_it   = content.begin() + edited_end;
+    #if TRACE_CONTENT_HOLDER
+      fmt::println(stderr, "length(edited_start, edited_end) = {}", length(edited_start, edited_end));
+    #endif
+    if (length(edited_start, edited_end) > replacement.size()) {
+      size_t excess = length(edited_start, edited_end) - replacement.size();
+      
+      // [ a | b c d e_1 e_2 e_3 | f g h i] -> [ a | b c d | f g h i]
+      // Сократим интервал.
+      std::move(edited_end_it, content.end(), edited_end_it - excess);
+
+      // Заменим данные.
+      std::move(replacement.begin(), replacement.end(), edited_start_it);
+
+      // Удаляем лишнее в конце, данные оттуда уже переместили.
+      content.erase(content.end() - excess, content.end());
+    } else if (length(edited_start, edited_end) < replacement.size()) {
+      // Интервал расширился. Место создали ранее, надо записать новое содержимое.
+      size_t underflow = replacement.size() - length(edited_start, edited_end);
+
+      std::move_backward(edited_end_it, content.end() - underflow, content.end());
+
+      // Заменим данные.
+      std::move(replacement.begin(), replacement.end(), edited_start_it);
+    } else {
+      std::move(replacement.begin(), replacement.end(), edited_start_it);
+    }
+
+    find_line_starts(range.start.line);
+  }
+
+  // Считая, что начала строк остались правильными до line_valid_until включительно
+  //  (всегда можно указать нулевую, первую в 1-индексации, строку, уж ее начало-то
+  //  правильное, она всегда с 0-го байта начинается). пересчитать начала строк.
+  void find_line_starts(size_t line_valid_until) {
+    size_t pos = line_starts[line_valid_until];
+    line_starts.erase(line_starts.begin() + line_valid_until + 1, line_starts.end());
+
+    for (; pos < content.size(); ++pos) {
+      if (content[pos] == '\n' && pos + 1 < content.size()) {
+        line_starts.push_back(pos + 1);
+      }
+    }
+  }
+};
 
 class LSPCompilationDriver final : public CompilationDriver {
   using CompilationDriver::CompilationDriver;
@@ -82,10 +206,17 @@ public:
     : uri_(std::move(uri)), abs_path_(uri_.GetAbsolutePath().path) {
       assert(abs_path_.is_absolute());
 
-      Invalidate();
+      std::ifstream file(abs_path_);
+      auto content = std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+      editor_content.set_content(content);
+
+      Recompile();
   }
 
-  void Invalidate() {
+  ViewedFile(const ViewedFile& other) = delete;
+  ViewedFile(ViewedFile&& other) = default;
+
+  void Recompile() {
       // Компилятор на данный момент ищет файлы в рабочей директории.
       //   В том числе, все импортируемые. Кроме стандартной библиотеки,
       //   которую он найдет и так, если мы укажем переменную окружения.
@@ -107,17 +238,19 @@ public:
         // Важно, чтобы module_name существовал все время выполнения
         //   этой функции, потому что compilation driver
         //   принимает эту строку как std::string_view.
-        LSPCompilationDriver driver(module_name);
+        auto driver = std::make_unique<LSPCompilationDriver>(module_name);
 
-        driver.PrepareForTooling();
+        driver->PrepareForTooling();
 
-        LSPVisitor visitor(std::string(abs_path_), &symbols, &usages);
+        std::vector<lsDocumentSymbol> new_symbols;
+        std::vector<SymbolUsage> new_usages;
+        LSPVisitor visitor(std::string(abs_path_), &new_symbols, &new_usages);
 
-        symbols.clear();
-        usages.clear();
-        diagnostic.reset();
+        driver->RunVisitor(&visitor);
 
-        driver.RunVisitor(&visitor);
+        last_driver = std::move(driver);
+        symbols = std::move(new_symbols);
+        usages = std::move(new_usages);
       } catch (const ErrorAtLocation& err) {
         diagnostic = lsDiagnostic{
           range: lsRange{
@@ -138,20 +271,71 @@ public:
       }
   }
 
-  void InvalidateOnLookup() {
-    invalidate_on_lookup = true;
+  void RecompileOnLookup() {
+    recompile_on_lookup = true;
   }
 
   void Lookup() {
-    if (invalidate_on_lookup) {
-      Invalidate();
-      invalidate_on_lookup = false;
+    if (recompile_on_lookup) {
+      Recompile();
+      recompile_on_lookup = false;
     }
+  }
+
+  // Delete information about symbols after position (there was
+  //   a change starting from this position). Symbols not touched
+  //   by modification are kept. With assumption that their accessible
+  //   scope symbols and definitions aren't changed by the modification.
+  //   Because it can only reference what is before, so it doesn't reference
+  //   anything modified.
+  void InvalidateAfterPosition(lsPosition position) {
+    #if TRACE_INVALIDATION
+      fmt::println(
+        stderr,
+        "Before InvalidateAfterPosition symbols.size() = {}, usages.size() = {}",
+        symbols.size(),
+        usages.size()
+    );
+    #endif
+    
+    std::erase_if(symbols, [&](const lsDocumentSymbol& symbol) {
+      const lsPosition& end = symbol.range.start;
+      return end.line > position.line || (end.line == position.line && end.character >= position.character);
+    });
+
+    std::erase_if(usages, [&](const SymbolUsage& usage) {
+      const lsPosition& end = usage.range.end;
+      if (end.line > position.line || (end.line == position.line && end.character >= position.character)) {
+        return true;
+      }
+
+      lsPosition def_end = LsPositionFromLexLocation(usage.decl_def.def_position);
+      if (def_end.line > position.line || (def_end.line == position.line && def_end.character >= position.character)) {
+        return true;
+      }
+
+      lsPosition decl_end = LsPositionFromLexLocation(usage.decl_def.decl_position);
+      if (decl_end.line > position.line || (decl_end.line == position.line && decl_end.character >= position.character)) {
+        return true;
+      }
+
+      return false;
+    });
+
+    #if TRACE_INVALIDATION
+      fmt::println(
+        stderr,
+        "After InvalidateAfterPosition symbols.size() = {}, usages.size() = {}",
+        symbols.size(),
+        usages.size()
+    );
+    #endif
+    
   }
 private:
   std::string GetModuleName() {
-      // Module.et -> Module
-      return abs_path_.filename().replace_extension();
+    // Module.et -> Module
+    return abs_path_.filename().replace_extension();
   }
 public:
   lsDocumentUri uri_;
@@ -161,15 +345,32 @@ public:
   std::vector<lsDocumentSymbol> symbols;
   std::vector<SymbolUsage> usages;
 
-  std::optional<std::string> unsaved_content;
+  // Last driver is stored for the module pointers to be up to date.
+  //   Otherwise module pointers are freed upon compilation driver
+  //   destruction.
+  std::unique_ptr<LSPCompilationDriver> last_driver;
 
-  bool invalidate_on_lookup = false;
+  // Previosly we'd store std::string here with the full contents.
+  //   But vscode doesn't tell the changed position, if we use
+  //   full synchronization.
+  // 
+  EditedFile editor_content;
+
+  bool recompile_on_lookup = false;
 };
+
+
 
 std::unordered_map<std::string, ViewedFile> file_cache;
 
 lex::InputFile LSPCompilationDriver::OpenFile(std::string_view name) {
   auto rel_path = std::string(name) + ".et";
+
+  // The file we're asked to open is always in cwd. We cd there before
+  //   opening, because etude compiler expect that (or it'll search
+  //   in stdlib, but we get absolute paths from language protocol
+  //   client anyway and then set module name to be just the filename
+  //   without .et).
 
   // Also forcing lowercase on windows. Because default fs there (ntfs)
   //   is not case-sensitive.
@@ -179,9 +380,7 @@ lex::InputFile LSPCompilationDriver::OpenFile(std::string_view name) {
   if (it != file_cache.end()) {
     auto& file = it->second;
 
-    if (file.unsaved_content.has_value()) {
-      return lex::InputFile{std::stringstream(file.unsaved_content.value()), std::move(abs_path)};
-    }
+    return lex::InputFile{std::stringstream(file.editor_content.content), std::move(abs_path)};
   } 
   
   return CompilationDriver::OpenFile(name);
@@ -218,7 +417,7 @@ int main(int argc, char** argv) {
     response.result.capabilities = lsServerCapabilities {
         .textDocumentSync = {{{}, lsTextDocumentSyncOptions{
           .openClose = true,
-          .change = lsTextDocumentSyncKind::Full,
+          .change = lsTextDocumentSyncKind::Incremental,
           .save = lsSaveOptions {
             .includeText = false
           },
@@ -277,7 +476,7 @@ int main(int argc, char** argv) {
       // Но все эти ухищрения только для случая, где
       //   у кого-то неправильный регистр.
 
-      auto result = file_cache.insert({uri.GetAbsolutePath().path, std::move(file)});
+      auto result = file_cache.insert({uri.GetAbsolutePath().path, ViewedFile(std::move(file))});
       assert(result.second);
       file_it = std::move(result.first);
     }
@@ -300,9 +499,13 @@ int main(int argc, char** argv) {
 
     td_symbol::response response;
     response.id = request.id;
-    if (!file.diagnostic.has_value()) {
-      response.result = file.symbols;
+
+    if (!initialized) {
+      return response;
     }
+
+    response.result = file.symbols;
+
     return response;
   });
 
@@ -313,7 +516,7 @@ int main(int argc, char** argv) {
     td_definition::response response;
     response.id = request.id;
 
-    if (file.diagnostic.has_value()) {
+    if (!initialized) {
       return response;
     }
 
@@ -370,7 +573,7 @@ int main(int argc, char** argv) {
     td_highlight::response response;
     response.id = request.id;
 
-    if (file.diagnostic.has_value()) {
+    if (!initialized) {
       return response;
     }
 
@@ -401,7 +604,7 @@ int main(int argc, char** argv) {
     std::vector<lsDocumentHighlight> highlights; 
     if (usage != nullptr) {
       for (auto& usage_item: file.usages) {
-        if (usage_item.declared_at == usage->declared_at) {
+        if (usage_item.decl_def == usage->decl_def) {
           highlights.push_back(lsDocumentHighlight{usage_item.range});          
         }
       }
@@ -419,7 +622,7 @@ int main(int argc, char** argv) {
     td_hover::response response;
     response.id = request.id;
 
-    if (file.diagnostic.has_value()) {
+    if (!initialized) {
       return response;
     }
 
@@ -451,9 +654,9 @@ int main(int argc, char** argv) {
         response.result.range = usage->range;
       }
     }
+
     return response;
   });
-
 
   client_endpoint.registerHandler([&](Notify_InitializedNotification::notify& notify) {
     initialized.store(true);
@@ -475,6 +678,7 @@ int main(int argc, char** argv) {
     logger.log(lsp::Log::Level::INFO, "opened file with uri " + notify.params.textDocument.uri.raw_uri_);
   });
 
+
   client_endpoint.registerHandler([&](Notify_TextDocumentDidChange::notify& notify) {
     if (!initialized) {
         return;
@@ -488,8 +692,13 @@ int main(int argc, char** argv) {
     auto& file_uri = notify.params.textDocument.uri;
     ViewedFile& target_file = find_file(file_uri);
 
-    target_file.unsaved_content = notify.params.contentChanges.back().text;
-    target_file.Invalidate();
+    for (const lsTextDocumentContentChangeEvent& event: notify.params.contentChanges) {
+      assert(event.range.has_value()); // Значение отсутствует только для обновлений в формате "весь файл сразу".
+      target_file.editor_content.update_content(event.range.value(), event.text);
+      target_file.InvalidateAfterPosition(event.range->end);
+    }
+
+    target_file.Recompile();
     update_diagnostics(target_file);
 
     for (auto& [_, file]: file_cache) {
@@ -498,7 +707,7 @@ int main(int argc, char** argv) {
         continue;
       }
 
-      file.InvalidateOnLookup();
+      file.RecompileOnLookup();
     }
   });
 
@@ -506,12 +715,6 @@ int main(int argc, char** argv) {
     if (!initialized) {
         return;
     }
-
-    auto& file_uri = notify.params.textDocument.uri;
-    ViewedFile& target_file = find_file(file_uri);
-
-    // Now we can read just from the fs.
-    target_file.unsaved_content.reset();
   });
 
   client_endpoint.registerHandler([&](Notify_TextDocumentDidClose::notify& notify) {
