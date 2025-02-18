@@ -41,11 +41,10 @@ void LSPVisitor::VisitExprStatement(ExprStatement* node) {
 void LSPVisitor::VisitTypeDecl(TypeDeclStatement* node) {
   usages_->push_back(SymbolUsage{
     range: LsRangeFromLexToken(node->name_),
-    declared_at: {
-      path: file_path_,
-      decl_position: LsPositionFromLexLocation(node->name_.location),
-      def_position: LsPositionFromLexLocation(node->name_.location),
-    }
+    decl_def: {
+      decl_position: node->name_.location,
+      def_position: node->name_.location,
+    },
   });
 
   symbols_->push_back(lsDocumentSymbol{
@@ -80,10 +79,9 @@ void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
 
   usages_->push_back(SymbolUsage{
     range: LsRangeFromLexToken(node->lvalue_->name_),
-    declared_at: {
-      path: file_path_,
-      decl_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
-      def_position: LsPositionFromLexLocation(node->lvalue_->name_.location),
+    decl_def: {
+      decl_position: node->lvalue_->name_.location,
+      def_position: node->lvalue_->name_.location,
     },
     type_name: node->value_->GetType()->Format(),
   });
@@ -94,10 +92,9 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
     // TODO: mark as definition if it is in fact definition, not only declaration.
     usages_->push_back(SymbolUsage{
       range: LsRangeFromLexToken(node->name_),
-      declared_at: {
-        path: file_path_,
-        decl_position: LsPositionFromLexLocation(node->name_.location),
-        def_position: LsPositionFromLexLocation(node->name_.location),
+      decl_def: {
+        decl_position: node->name_.location,
+        def_position: node->name_.location,
       }
     });
   }
@@ -121,10 +118,9 @@ void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
 
       usages_->push_back(SymbolUsage{
         range: LsRangeFromLexToken(param),
-        declared_at: {
-          path: file_path_,
-          decl_position: LsPositionFromLexLocation(param.location),
-          def_position: LsPositionFromLexLocation(param.location),
+        decl_def: {
+          decl_position: param.location,
+          def_position: param.location,
         }
       });
     }
@@ -189,10 +185,9 @@ void LSPVisitor::VisitBindingPat(BindingPattern* node) {
 
   usages_->push_back(SymbolUsage{
     range: LsRangeFromLexToken(node->name_),
-    declared_at: {
-      path: file_path_,
-      decl_position: LsPositionFromLexLocation(node->name_.location),
-      def_position: LsPositionFromLexLocation(node->name_.location),
+    decl_def: {
+      decl_position: node->name_.location,
+      def_position: node->name_.location,
     },
     type_name: node->type_->Format(),
   });
@@ -245,10 +240,9 @@ void LSPVisitor::VisitVariantPat(VariantPattern* node) {
     if (member.field == node->name_.GetName()) {
       usages_->push_back(SymbolUsage{
         range: LsRangeFromLexToken(node->name_),
-        declared_at: {
-          path: member.name.location.unit->GetAbsPath(),
-          decl_position: LsPositionFromLexLocation(member.name.location),
-          def_position: LsPositionFromLexLocation(member.name.location),
+        decl_def: {
+          decl_position: member.name.location,
+          def_position: member.name.location,
         },
         type_name: type->Format(),
       });
@@ -359,10 +353,9 @@ void LSPVisitor::VisitCompoundInitalizer(CompoundInitializerExpr* node) {
         if (member.field == initializer.field) {
           usages_->push_back(SymbolUsage{
             range: LsRangeFromLexToken(initializer.name),
-            declared_at: {
-              path: member.name.location.unit->GetAbsPath(),
-              decl_position: LsPositionFromLexLocation(member.name.location),
-              def_position: LsPositionFromLexLocation(member.name.location),
+            decl_def: {
+              decl_position: member.name.location,
+              def_position: member.name.location,
             },
             type_name: member.ty->Format(),
           });
@@ -395,10 +388,9 @@ void LSPVisitor::VisitFieldAccess(FieldAccessExpression* node) {
     if (member.field == node->field_name_.GetName()) {
       usages_->push_back(SymbolUsage{
         range: LsRangeFromLexToken(node->field_name_),
-        declared_at: {
-          path: member.name.location.unit->GetAbsPath(),
-          decl_position: LsPositionFromLexLocation(member.name.location),
-          def_position: LsPositionFromLexLocation(member.name.location),
+        decl_def: {
+          decl_position: member.name.location,
+          def_position: member.name.location,
         },
         type_name: node->GetType()->Format(),
       });
@@ -421,12 +413,11 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
   if (symbol != nullptr) {
     usages_->push_back(SymbolUsage{
       range: LsRangeFromLexToken(node->name_),
-      declared_at: {
-        path: symbol->declared_at.unit.GetAbsPath(),
-        decl_position: LsPositionFromLexLocation(symbol->declared_at.position),
-        def_position: LsPositionFromLexLocation(symbol->declared_at.position),
+      decl_def: {
+        decl_position: symbol->declared_at.position,
+        def_position: symbol->declared_at.position,
       },
-      type_name: symbol->GetType()->Format(),
+       type_name: symbol->GetType()->Format(),
     });
   }
 

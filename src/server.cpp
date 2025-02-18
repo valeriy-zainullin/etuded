@@ -346,9 +346,15 @@ int main(int argc, char** argv) {
       // Distinguish decl and def positions like done in cquery:
       //    https://github.com/jacobdufault/cquery/blob/9b80917cbf7d26b78ec62b409442ecf96f72daf9/src/messages/text_document_definition.cc#L96
       locations.push_back(LocationLink {
-        targetUri: lsDocumentUri::FromPath(usage->declared_at.path),
-        targetRange: lsRange(usage->declared_at.decl_position, usage->declared_at.decl_position),
-        targetSelectionRange: lsRange(usage->declared_at.decl_position, usage->declared_at.decl_position),
+        targetUri: lsDocumentUri::FromPath(usage->decl_def.decl_position.unit->GetAbsPath().string()),
+        targetRange: lsRange{
+          LsPositionFromLexLocation(usage->decl_def.decl_position),
+          LsPositionFromLexLocation(usage->decl_def.decl_position),
+        },
+        targetSelectionRange: lsRange{
+          LsPositionFromLexLocation(usage->decl_def.decl_position),
+          LsPositionFromLexLocation(usage->decl_def.decl_position),
+        },
       });
     }
 

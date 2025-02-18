@@ -16,40 +16,34 @@
 #include "driver/compil_driver.hpp"
 #include "driver/module.hpp"
 
+struct SymbolDeclDefInfo {
+  // Function, type or variable was imported, if it is from another module.
+  //   But then it was declared in that module we import it from
+  //   Declaration and definition always reside in the same module.
+
+  lex::Location decl_position;
+  lex::Location def_position;
+};
+
 struct SymbolUsage {
   lsRange range;
 
-  struct SymbolDeclDefInfo {
-    // Function, type or variable was imported, if it is from another module.
-    //   But then it was declared in that module we import it from
-    //   Declaration and definition always reside in the same module.
-
-    std::string path;
-    lsPosition decl_position;
-    lsPosition def_position;
-
-    bool operator==(const SymbolDeclDefInfo& other) const {
-      if (lsp::NormalizePath(path, false) != lsp::NormalizePath(other.path, false)) {
-        return false;
-      }
-
-      if (decl_position != other.decl_position) {
-        return false;
-      }
-
-      if (def_position != other.def_position) {
-        return false;
-      }
-
-      return true;
-    }
-  } declared_at;
+  SymbolDeclDefInfo decl_def;
 
   std::optional<std::string> type_name;
 
   bool is_decl = false;
   bool is_def = false;
 };
+
+inline bool operator==(const lex::Location& lhs, const lex::Location& rhs) {
+  return lhs.unit == rhs.unit && lhs.lineno == rhs.lineno && lhs.columnno == rhs.columnno;
+}
+
+inline bool operator==(const SymbolDeclDefInfo& lhs, const SymbolDeclDefInfo& rhs) {
+  return lhs.decl_position == rhs.decl_position && lhs.def_position == rhs.def_position;
+}
+
 
 inline lsPosition LsPositionFromLexLocation(const lex::Location& location) {
   // Не думаю, что кто-то будет открывать файл размером в 4 гигабайта.
