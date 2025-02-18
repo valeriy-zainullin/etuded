@@ -128,22 +128,22 @@ public:
 
   // Expressions
 
-  void VisitComparison(ComparisonExpression* node) override { fmt::println(stderr, "DEBUG: VisitComparison was called"); }
+  void VisitComparison(ComparisonExpression* node) override;
   void VisitBinary(BinaryExpression* node) override;
   void VisitUnary(UnaryExpression* node) override;
   void VisitDeref(DereferenceExpression* node) override;
   void VisitAddressof(AddressofExpression* node) override;
   void VisitIf(IfExpression* node) override;
   void VisitMatch(MatchExpression* node) override;
-  void VisitNew(NewExpression* node) override { fmt::println(stderr, "DEBUG: VisitNew was called"); }
+  void VisitNew(NewExpression* node) override;
   void VisitBlock(BlockExpression* node) override;
   void VisitFnCall(FnCallExpression* node) override;
-  void VisitIntrinsic(IntrinsicCall* node) override { fmt::println(stderr, "DEBUG: VisitIntrinsic was called"); }
+  void VisitIntrinsic(IntrinsicCall* node) override;
   void VisitCompoundInitalizer(CompoundInitializerExpr* node) override;
   void VisitFieldAccess(FieldAccessExpression* node) override;
   void VisitVarAccess(VarAccessExpression* node) override;
-  void VisitLiteral(LiteralExpression* node) override { fmt::println(stderr, "DEBUG: VisitLiteral was called"); }
-  void VisitTypecast(TypecastExpression* node) override { fmt::println(stderr, "DEBUG: VisitLiteral was called"); }
+  void VisitLiteral(LiteralExpression* node) override;
+  void VisitTypecast(TypecastExpression* node) override;
 
 private:
   const std::string file_path_;

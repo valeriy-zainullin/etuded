@@ -254,6 +254,12 @@ void LSPVisitor::VisitVariantPat(VariantPattern* node) {
 
 // Expressions
 
+void LSPVisitor::VisitComparison(ComparisonExpression* node) {
+  node->left_->Accept(this);
+  node->right_->Accept(this);
+}
+
+
 void LSPVisitor::VisitBinary(BinaryExpression* node) {
   #if TRACE_VISITOR
     fmt::println(stderr, "TRACE: LSPVisitor::VisitBinary called.");
@@ -294,6 +300,24 @@ void LSPVisitor::VisitIf(IfExpression* node) {
   }
 }
 
+void LSPVisitor::VisitNew(NewExpression* node) {
+  // Может быть nullptr.
+  //   Из парсера: parse_expr.cpp, Parser::ParseNewExpression()
+  //   Из генератора IR: ir_emitter.cpp, IrEmitter::VisitNew
+  if (node->allocation_size_ != nullptr) {
+    node->allocation_size_->Accept(this);
+  }
+  // Может быть nullptr.
+  //   Из парсера: parse_expr.cpp, Parser::ParseNewExpression()
+  //   Из генератора IR: ir_emitter.cpp, IrEmitter::VisitNew
+  if (node->initial_value_ != nullptr) {
+    node->initial_value_->Accept(this);
+  }
+
+  // todo: подписать тип.
+}
+
+
 void LSPVisitor::VisitMatch(MatchExpression* node) {
   #if TRACE_VISITOR
     fmt::println(stderr, "TRACE: LSPVisitor::VisitMatch called.");
@@ -327,6 +351,15 @@ void LSPVisitor::VisitFnCall(FnCallExpression* node) {
   #if TRACE_VISITOR
     fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
   #endif
+}
+
+// В нашем случае, полная копия VisitFnCall.
+void LSPVisitor::VisitIntrinsic(IntrinsicCall* node) {
+  node->callable_->Accept(this);
+
+  for (auto& arg: node->arguments_) {
+    arg->Accept(this);
+  }
 }
 
 void LSPVisitor::VisitCompoundInitalizer(CompoundInitializerExpr* node) {
@@ -427,4 +460,14 @@ void LSPVisitor::VisitVarAccess(VarAccessExpression* node) {
     range: LsRangeFromLexToken(node->name_),
     selectionRange: LsRangeFromLexToken(node->name_),
   });
+}
+
+void LSPVisitor::VisitLiteral(LiteralExpression* node) {
+  // No operation.
+  //   Нет символов, создаеваемых или упоминаемых.
+}
+
+void LSPVisitor::VisitTypecast(TypecastExpression* node) {
+  node->expr_->Accept(this);
+  // TODO: add highlight for destination type.
 }
