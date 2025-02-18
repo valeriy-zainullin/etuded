@@ -330,7 +330,9 @@ void LSPVisitor::VisitFnCall(FnCallExpression* node) {
     arg->Accept(this);
   }
 
-  fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
+  #if TRACE_VISITOR
+    fmt::println(stderr, "FnCall(.fn_name_ = {}, .callable = {})", node->fn_name_, reinterpret_cast<void*>(node->callable_));
+  #endif
 }
 
 void LSPVisitor::VisitCompoundInitalizer(CompoundInitializerExpr* node) {

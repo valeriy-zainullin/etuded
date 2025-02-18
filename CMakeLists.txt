@@ -26,5 +26,5 @@ add_subdirectory(etude)
 # CPMAddPackage("gh:otakubeam/etude#effcece34dacc2e20d5db81c276b0e22ae984814")
 target_link_libraries(server PRIVATE compiler)
 
-target_compile_definitions(server PRIVATE TRACE_VISITOR=1)
+target_compile_definitions(server PRIVATE TRACE_VISITOR=0)
 
