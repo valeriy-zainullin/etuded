@@ -30,6 +30,8 @@
 #include "LibLsp/lsp/textDocument/did_change.h"
 #include "LibLsp/lsp/textDocument/did_save.h"
 #include "LibLsp/lsp/textDocument/highlight.h"
+#include "LibLsp/lsp/textDocument/prepareRename.h"
+#include "LibLsp/lsp/textDocument/rename.h"
 #include "LibLsp/lsp/textDocument/hover.h"
 #include "LibLsp/lsp/utils.h"
 
@@ -328,7 +330,7 @@ public:
         "After InvalidateAfterPosition symbols.size() = {}, usages.size() = {}",
         symbols.size(),
         usages.size()
-    );
+      );
     #endif
     
   }
@@ -426,6 +428,7 @@ int main(int argc, char** argv) {
         .definitionProvider = {{true, {}}},
         .documentHighlightProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
+        .renameProvider = {{{}, RenameOptions{true}}},
         .documentLinkProvider = lsDocumentLinkOptions {},
     };
 
@@ -654,6 +657,130 @@ int main(int argc, char** argv) {
         response.result.range = usage->range;
       }
     }
+
+    return response;
+  });
+
+  client_endpoint.registerHandler([&](const td_prepareRename::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    td_prepareRename::response response;
+    response.id = request.id;
+
+    if (!initialized) {
+      return response;
+    }
+
+    SymbolUsage* usage = nullptr;
+    const lsPosition& editor_pos = request.params.position;
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.range.start.line != editor_pos.line) {
+        continue;
+      }
+
+      // Разрешаем равенство, т.к. можно встать сразу после символа,
+      //   это все еще разрешено. И после токена обычно пробельный символ,
+      //   потому все ок.
+      if (
+        usage_item.range.start.character <= editor_pos.character &&
+        editor_pos.character <= usage_item.range.end.character
+      ) {
+        assert(
+          usage == nullptr &&
+          "BUG: usages overlap (requested position is in both)."
+        );
+        usage = &usage_item;
+      }
+    }
+
+    if (usage == nullptr) {
+      return response;
+    }
+
+    EditedFile& content = file.editor_content;
+    const char* old_name = content.content.c_str() + content.line_starts[usage->range.start.line] + usage->range.start.character;
+
+    // There is no multiline tokens in Etude as of now.
+    size_t len = usage->range.end.character - usage->range.start.character + 1;
+    
+    if (file.last_driver->GetModuleOf(std::string_view(old_name, len)) != nullptr) {
+      // Cannot rename across modules for now! Need buildsystem integration to get all files to rename.
+      return response;
+    }
+
+    response.result.first = usage->range;
+
+
+    return response;
+  });
+
+  client_endpoint.registerHandler([&](const td_rename::request& request) {
+    auto& file_uri = request.params.textDocument.uri;
+    ViewedFile& file = find_file(file_uri);
+
+    td_rename::response response;
+    response.id = request.id;
+
+    if (!initialized) {
+      return response;
+    }
+
+    SymbolUsage* usage = nullptr;
+    const lsPosition& editor_pos = request.params.position;
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.range.start.line != editor_pos.line) {
+        continue;
+      }
+
+      // Разрешаем равенство, т.к. можно встать сразу после символа,
+      //   это все еще разрешено. И после токена обычно пробельный символ,
+      //   потому все ок.
+      if (
+        usage_item.range.start.character <= editor_pos.character &&
+        editor_pos.character <= usage_item.range.end.character
+      ) {
+        assert(
+          usage == nullptr &&
+          "BUG: usages overlap (requested position is in both)."
+        );
+        usage = &usage_item;
+      }
+    }
+
+    if (usage == nullptr) {
+      return response;
+    }
+
+    EditedFile& content = file.editor_content;
+    const char* old_name = content.content.c_str() + content.line_starts[usage->range.start.line] + usage->range.start.character;
+
+    // There is no multiline tokens in Etude as of now.
+    size_t len = usage->range.end.character - usage->range.start.character + 1;
+    
+    if (file.last_driver->GetModuleOf(std::string_view(old_name, len)) != nullptr) {
+      // Cannot rename across modules for now! Need buildsystem integration to get all files to rename.
+      return response;
+    }
+
+    response.result.changes = decltype(response.result.changes)::value_type();
+
+    for (auto& usage_item: file.usages) {
+      // Токен не может продолжаться на следующей строке, перевод строки --
+      //   разделитель. Потому можно смотреть на строку начала.
+      if (usage_item.decl_def != usage->decl_def) {
+        continue;
+      }
+
+      auto uri = request.params.textDocument.uri.raw_uri_;
+
+      response.result.changes.value()[uri].push_back(lsTextEdit{usage_item.range, request.params.newName});
+    }
+
 
     return response;
   });

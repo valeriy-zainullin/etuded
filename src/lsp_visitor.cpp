@@ -88,17 +88,6 @@ void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
 }
 
 void LSPVisitor::VisitFunDecl(FunDeclStatement* node) {
-  if (!node->trait_method_) {
-    // TODO: mark as definition if it is in fact definition, not only declaration.
-    usages_->push_back(SymbolUsage{
-      range: LsRangeFromLexToken(node->name_),
-      decl_def: {
-        decl_position: node->name_.location,
-        def_position: node->name_.location,
-      }
-    });
-  }
-
   if (node->body_) {
     // TODO: store fun token inside of fun decl, include it into the symbol.
     symbols_->push_back(lsDocumentSymbol{
