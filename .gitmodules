@@ -1,3 +1,6 @@
 [submodule "etude"]
 	path = etude
 	url = git@github.com:valeriy-zainullin/etude.git
+[submodule "lspcpp"]
+	path = lspcpp
+	url = git@github.com:kuafuwang/LspCpp.git

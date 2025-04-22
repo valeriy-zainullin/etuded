@@ -13,7 +13,7 @@ include(cmake/CPM.cmake)
 
 add_executable(server src/server.cpp src/lsp_visitor.cpp)
 
-CPMAddPackage("gh:kuafuwang/LspCpp#84beb16794cfdf5e46bf7794574d22e1589bc970")
+CPMAddPackage("gh:kuafuwang/LspCpp#70e03ceea2c5b4ae93814a2eb14bc8f4dc8ae207")
 # Так вот почему санитайзеры ругаются. Комплиятор уже при сборке говорит о том,
 #   что могут быть проблемы. Если их добавить в сборку, то выйдут ошибки компиляции
 #   на эту библиотеку. Эту ошибку в runtime можно избежать, если знать, как заставить эту

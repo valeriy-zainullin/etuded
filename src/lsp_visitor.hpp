@@ -25,7 +25,6 @@ struct SymbolDeclDefInfo {
   lex::Location def_position;
 
   bool is_exported = false;
-  bool is_imported = false;
 };
 
 struct SymbolUsage {
