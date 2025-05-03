@@ -429,7 +429,6 @@ int main(int argc, char** argv) {
         .documentHighlightProvider = {{true, {}}},
         .documentSymbolProvider = {{true, {}}},
         .renameProvider = {{{}, RenameOptions{true}}},
-        .documentLinkProvider = lsDocumentLinkOptions {},
     };
 
     return response;

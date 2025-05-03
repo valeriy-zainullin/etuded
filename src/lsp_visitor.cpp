@@ -53,13 +53,6 @@ void LSPVisitor::VisitTypeDecl(TypeDeclStatement* node) {
     range: LsRangeFromLexToken(node->name_),
     selectionRange: LsRangeFromLexToken(node->name_),
   });
-
-  // TODO: also check what type variant it really is and
-  //   store it's symbol declarations in the symbol vector
-  //   (not in the symboltable).
-
-  // TODO: also store symbols for type usages, so that it's
-  //   possible to jump to their definitinos.
 }
 
 
