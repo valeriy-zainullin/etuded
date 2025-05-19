@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 
 project(etude-lsp-server)
 set(CMAKE_CXX_STANDARD 20)
+set(BUILD_SHARED_LIBS OFF) # So that it is portable across linuxes.
+if(WIN32)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES .lib)
+else()
+  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+  add_compile_options(-static)
+  add_link_options(-static)
+endif()
 
 add_compile_options(-fsanitize=address,undefined)
 add_link_options(-fsanitize=address,undefined)

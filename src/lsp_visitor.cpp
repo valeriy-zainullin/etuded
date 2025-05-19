@@ -61,6 +61,7 @@ void LSPVisitor::VisitVarDecl(VarDeclStatement* node) {
     fmt::println(stderr, "TRACE: LSPVisitor::VisitVarDecl called.");
   #endif
 
+  assert(node->value_ != nullptr);
   node->value_->Accept(this);
 
   symbols_->push_back(lsDocumentSymbol{
