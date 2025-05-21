@@ -246,7 +246,7 @@ public:
 
         std::vector<lsDocumentSymbol> new_symbols;
         std::vector<SymbolUsage> new_usages;
-        LSPVisitor visitor(std::string(abs_path_), &new_symbols, &new_usages);
+        LSPVisitor visitor(abs_path_.string(), &new_symbols, &new_usages);
 
         driver->RunVisitor(&visitor);
 
@@ -337,7 +337,7 @@ public:
 private:
   std::string GetModuleName() {
     // Module.et -> Module
-    return abs_path_.filename().replace_extension();
+    return abs_path_.filename().replace_extension().string();
   }
 public:
   lsDocumentUri uri_;
@@ -398,7 +398,17 @@ int main(int argc, char** argv) {
   fs::path exec_dir  = exec_path.parent_path();
   fs::path stdlib_path  = exec_dir / "etude_stdlib";
   // Makes a copy of strings pointed by name and value.
-  setenv("ETUDE_STDLIB", std::string(stdlib_path).c_str(), true);
+  //   So it's file to pass c_str here. Temporary objects
+  //   will be destroyed after full expression. Full expression
+  //   ends with ';' that means it is destroyed "after" ';'
+  //   (we're comparing a token and expressions, of course,
+  //   but that means it's alive while the full expression
+  //   is being evaluated).
+  #if defined(_WIN32)
+    putenv(("ETUDE_STDLIB=" + stdlib_path.string()).c_str());
+  #else
+    setenv("ETUDE_STDLIB", stdlib_path.string().c_str(), true);
+  #endif
 
   std::atomic<bool> initialized = false;
   std::atomic<bool> exiting = false;

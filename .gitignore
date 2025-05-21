@@ -2,4 +2,6 @@ build
 build_vscode
 .vscode
 /server
+/server.exe
 etc
+etc.exe
