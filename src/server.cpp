@@ -58,7 +58,7 @@ struct EditedFile {
   //   as well or compute ends by subtracting one from the next line start, which seems
   //   hacky.
   // The last line does not necessarily end with a '\n'. If so, end-of-file ends active
-  //   line, without producing any more of them. Tbis is handled by the fact that
+  //   line, without producing any more of them. This is handled by the fact that
   //   we add new lines upon '\n', but only if a new line will actually start. So
   //   if the last line ends with '\n', we won't start a new line as a special case.
 
@@ -153,7 +153,7 @@ struct EditedFile {
 
   // Считая, что начала строк остались правильными до line_valid_until включительно
   //  (всегда можно указать нулевую, первую в 1-индексации, строку, уж ее начало-то
-  //  правильное, она всегда с 0-го байта начинается). пересчитать начала строк.
+  //  правильное, она всегда с 0-го байта начинается), пересчитать начала строк.
   void find_line_starts(size_t line_valid_until) {
     size_t pos = line_starts[line_valid_until];
     line_starts.erase(line_starts.begin() + line_valid_until + 1, line_starts.end());
@@ -678,6 +678,15 @@ int main(int argc, char** argv) {
     response.id = request.id;
 
     if (!initialized) {
+      return response;
+    }
+
+    if (file.diagnostic.has_value()) {
+      // Should not allow to rename, if there's an error.
+      //   Otherwise not all occurences may be renamed.
+      //   Some of symbol usages may be deleted due to compilation
+      //   error. Occurences may be among those symbol usages.
+      
       return response;
     }
 
