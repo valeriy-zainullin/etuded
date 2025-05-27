@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 
 project(etude-lsp-server)
 set(CMAKE_CXX_STANDARD 20)
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(NOT "$ENV{BUILD_SANITIZERS}" STREQUAL "1")
     set(BUILD_SHARED_LIBS OFF) # So that it is portable across linuxes.
     if(WIN32 AND MSVC)
         set(CMAKE_FIND_LIBRARY_SUFFIXES .lib)
@@ -22,6 +22,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 else()
     add_compile_options(-fsanitize=address,undefined)
     add_link_options(-fsanitize=address,undefined)
+endif()
+
+# Fix too many sections error.
+#   https://stackoverflow.com/a/62281145
+#   https://stackoverflow.com/a/64287929
+if(WIN32)
+  add_compile_options(-Wa,-mbig-obj -Wl,--oformat,pe-bigobj-x86-64)
+  add_link_options(-Wa,-mbig-obj -Wl,--oformat,pe-bigobj-x86-64)
 endif()
 
 # add_compile_options(-fsanitize=thread)
