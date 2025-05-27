@@ -246,7 +246,7 @@ public:
 
         std::vector<lsDocumentSymbol> new_symbols;
         std::vector<SymbolUsage> new_usages;
-        LSPVisitor visitor(abs_path_.string(), &new_symbols, &new_usages);
+        LSPVisitor visitor(&new_symbols, &new_usages);
 
         driver->RunVisitor(&visitor);
 

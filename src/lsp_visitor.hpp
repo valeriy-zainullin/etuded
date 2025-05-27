@@ -85,12 +85,10 @@ inline lsRange LsRangeFromLexToken(const lex::Token& token) {
 class LSPVisitor: public Visitor {
 public:
   LSPVisitor(
-    const std::string file_path,
     std::vector<lsDocumentSymbol>* symbols,
     std::vector<SymbolUsage>* usages
   )
-    : file_path_(file_path)
-    , symbols_(symbols)
+    : symbols_(symbols)
     , usages_(usages) {
       assert(symbols_ != nullptr);
   }
@@ -148,7 +146,6 @@ public:
   void VisitTypecast(TypecastExpression* node) override;
 
 private:
-  const std::string file_path_;
   std::vector<lsDocumentSymbol>* symbols_;
   std::vector<SymbolUsage>* usages_;
 };
