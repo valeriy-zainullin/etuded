@@ -28,8 +28,8 @@ endif()
 #   https://stackoverflow.com/a/62281145
 #   https://stackoverflow.com/a/64287929
 if(WIN32)
-  add_compile_options(-Wa,-mbig-obj -Wl,--oformat,pe-bigobj-x86-64)
-  add_link_options(-Wa,-mbig-obj -Wl,--oformat,pe-bigobj-x86-64)
+  add_compile_options(-m64 -Wa,-mbig-obj)
+  add_link_options(-m64 -Wa,-mbig-obj)
 endif()
 
 # add_compile_options(-fsanitize=thread)
