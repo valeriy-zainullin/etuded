@@ -42,6 +42,12 @@
 #include "logger.hpp"
 #include "lsp_visitor.hpp"
 
+// Needed for _setmode.
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace fs = std::filesystem;
 
 #define TRACE_CONTENT_HOLDER 1
@@ -408,6 +414,33 @@ int main(int argc, char** argv) {
     putenv(("ETUDE_STDLIB=" + stdlib_path.string()).c_str());
   #else
     setenv("ETUDE_STDLIB", stdlib_path.string().c_str(), true);
+  #endif
+
+  // From https://forums.codeguru.com/showthread.php?506745-stdin-stdout-as-binary-with-gcc:
+  //   *nix doesn't see a difference between binary and non-binary I/O. What you may be
+  //   running into is the difference between formatted and unformatted I/O. For unformatted
+  //   I/O, that's fread/fwrite.
+  //   Under Windows, there is a difference between binary and non-binary - that is,
+  //   the translation of '\n' to '\r\n'. In the MS-CRT (which MinGW uses), there's
+  //   _setmode() which you can use to make stdin binary.
+  // Applied to our case.
+  //   The problem is that LspCpp already outputs "\r\n" on it own. But with formatted IO
+  //   translation it becomes "\r\r\n". Unix terminators are converted to windows ones.
+  //   And language server protocol sees this as invalid, when it tries to binary read
+  //   headers. It expects just "\r\n" and not something like this. So disable the
+  //   translation.
+  // https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-studio-6.0/aa298581(v=vs.60)?redirectedfrom=MSDN
+  #if defined(_WIN32)
+    // Stdin works though. LSP protocol uses CRLF line terminators. And
+    //   mingw doesn't translate CRLF from VS code to LF, it seems like.
+    //   Or if it does, this is handled. But let's disable this, so that
+    //   stereams are same as binary just like on unix. 
+    if (
+      _setmode(_fileno(stdout), _O_BINARY) == -1 ||
+      _setmode(_fileno(stdin), _O_BINARY) == -1
+    ) {
+      perror("Cannot set mode on stdout or stdin");
+    }
   #endif
 
   std::atomic<bool> initialized = false;
